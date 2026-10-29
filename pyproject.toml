@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ze-json-research"
+version = "0.1.0"
+description = "Local-first research runner, provenance registry, and result store for ze_json"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "zuudevs" }]
+dependencies = ["PyYAML>=6.0,<7.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0,<9.0", "ruff>=0.6"]
+
+[project.scripts]
+ze-research = "ze_research.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ze_research = ["migrations/*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

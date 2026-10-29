@@ -1,0 +1,141 @@
+schema_version: 1
+
+experiment:
+  id: scanner-width-comparison
+  title: Scanner8 versus Scanner64
+  status: draft
+  categories:
+    - performance
+    - json-scanning
+
+  purpose: >
+    Mengukur latency dan throughput dua varian scanner JSON pada workload
+    dan kontrak pengukuran yang telah ditentukan.
+  motivation: >
+    Perubahan implementasi scanner perlu dievaluasi melalui pengukuran
+    terkontrol, bukan disimpulkan dari nama algoritma atau satu angka saja.
+  research_question: >
+    Bagaimana perbedaan latency dan throughput Scanner8 dan Scanner64
+    pada workload yang sama dengan kontrak pengukuran yang sama?
+
+  hypotheses:
+    - id: H1
+      statement: >
+        Scanner64 dapat menunjukkan latency lebih rendah pada workload
+        tertentu dibanding Scanner8. Arah dan besarnya harus ditentukan
+        dari data yang dikumpulkan, bukan diasumsikan benar.
+      metric: real_time
+      expected_direction: lower
+
+  assumptions:
+    - Dataset yang dibandingkan harus identik secara byte.
+    - Environment dan konfigurasi build dicatat pada manifest.
+  limitations:
+    - Hasil berlaku pada workload, compiler, konfigurasi, dan environment yang tercatat.
+    - Perbedaan antarproses tidak otomatis menjadi bukti kausal.
+
+  research_basis:
+    - id: BASIS-IMPL-001
+      basis_type: internal_implementation
+      statement: >
+        Kode benchmark proyek mendefinisikan keluarga benchmark Scanner8
+        dan Scanner64. Detail implementasi dan kesetaraan kontrak harus
+        diperiksa pada revision yang benar-benar diuji.
+      reference_ids:
+        - REF-SCANNER-BENCHMARK-SOURCE
+
+  references:
+    - id: REF-SCANNER-BENCHMARK-SOURCE
+      source_type: source_code
+      title: ze_json scanner benchmark implementation
+      url: https://github.com/zuudevs/ze_json/blob/main/benchmarks/scanner_benchmark/main.cpp
+      locator: MAKE_SCANNER_BENCHMARK and scanner benchmark registrations
+      accessed_at: null
+      evidence_note: >
+        Tinjau file pada commit source yang akan diuji. Referensi ini
+        menunjuk implementasi benchmark; referensi ini sendiri tidak
+        membuktikan bahwa satu varian lebih cepat.
+      review_status: unreviewed
+
+  metrics:
+    primary:
+      name: real_time
+      unit: ns/op
+      direction: lower_is_better
+    secondary:
+      - name: bytes_per_second
+        direction: higher_is_better
+
+  protocol:
+    design: interleaved_same_process
+    require_same_workload: true
+    require_same_measurement_contract: true
+    notes: >
+      Pastikan pasangan benchmark benar-benar berjalan di executable dan
+      proses yang sama jika klaim memerlukan desain interleaved.
+
+  comparison:
+    group: scanner-width
+    baseline: scanner8
+    candidate: scanner64
+
+  variants:
+    - id: scanner8
+      name: Scanner8
+      description: Scanner 8-byte variant; verify implementation at the tested revision.
+      comparison_role: baseline
+      lifecycle_status: experimental
+      measurement_contract_id: structural-scan-v1
+      benchmark_name_pattern: "BM_Scanner8_{dataset}"
+    - id: scanner64
+      name: Scanner64
+      description: Scanner 64-bit variant; verify implementation at the tested revision.
+      comparison_role: candidate
+      lifecycle_status: experimental
+      measurement_contract_id: structural-scan-v1
+      benchmark_name_pattern: "BM_Scanner64_{dataset}"
+
+  workloads:
+    - id: github-events
+      name: GitHub Events JSON dataset
+      dataset_path: samples/github_events.json
+      dataset_sha256: null
+      parameters: {}
+
+  measurement_contracts:
+    - id: structural-scan-v1
+      name: Structural scanner benchmark
+      operation: Scan the supplied JSON payload with the selected scanner benchmark.
+      includes:
+        - work performed inside the registered scanner benchmark loop
+      excludes:
+        - conclusions about full parser performance unless separately measured
+      notes: >
+        Audit main.cpp at the tested revision to verify exactly what setup,
+        validation, and buffer management are included in the timed region.
+
+  execution:
+    preset: native-release
+    require_clean_worktree: true
+    executable_path: "{build_dir}/benchmarks/scanner_benchmark"
+    configure_command:
+      - cmake
+      - -S
+      - "{source_dir}"
+      - -B
+      - "{build_dir}"
+      - -G
+      - Ninja
+      - -DCMAKE_BUILD_TYPE=Release
+    build_command:
+      - cmake
+      - --build
+      - "{build_dir}"
+      - --target
+      - scanner_benchmark
+    run_command:
+      - "{benchmark_executable}"
+      - "--benchmark_out={run_dir}/raw/scanner_benchmark.json"
+      - --benchmark_out_format=json
+    expected_outputs:
+      - raw/scanner_benchmark.json

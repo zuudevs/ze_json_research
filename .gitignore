@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.env
+.ze-research.toml
+
+# Never commit local research data or generated results.
+*.sqlite
+*.sqlite3
+*.db
+research-data/
+ze_json_research_data/
+build/
+dist/
+coverage.xml
+htmlcov/

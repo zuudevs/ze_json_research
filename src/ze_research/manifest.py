@@ -164,7 +164,11 @@ def verify_manifest(manifest_path: Path) -> dict[str, Any]:
             errors.append(f"Path artefak duplikat: {record['path']}")
             continue
         seen_paths.add(record["path"])
-        candidate = (run_dir / Path(*relative.parts)).resolve()
+        unresolved = run_dir / Path(*relative.parts)
+        if unresolved.is_symlink():
+            errors.append(f"Symlink artefak tidak dipercaya: {record['path']}")
+            continue
+        candidate = unresolved.resolve()
         try:
             candidate.relative_to(run_dir)
         except ValueError:
@@ -189,7 +193,11 @@ def verify_manifest(manifest_path: Path) -> dict[str, Any]:
             if relative.is_absolute() or ".." in relative.parts:
                 errors.append(f"Expected output path tidak aman: {output}")
                 continue
-            candidate = (run_dir / Path(*relative.parts)).resolve()
+            unresolved = run_dir / Path(*relative.parts)
+            if unresolved.is_symlink():
+                errors.append(f"Symlink expected output tidak dipercaya: {output}")
+                continue
+            candidate = unresolved.resolve()
             try:
                 candidate.relative_to(run_dir)
             except ValueError:

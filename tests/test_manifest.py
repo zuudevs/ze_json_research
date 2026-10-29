@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from ze_research.manifest import collect_artifacts, sha256_file, verify_manifest, write_json_atomic
 from ze_research.registry import definition_sha256
 
@@ -46,3 +48,34 @@ def test_manifest_rejects_traversal_path(tmp_path):
     result = verify_manifest(manifest_path)
     assert result["valid"] is False
     assert any("tidak aman" in error for error in result["errors"])
+
+
+def test_manifest_rejects_symlink_artifact(tmp_path):
+    run_dir = tmp_path / "run"
+    raw_dir = run_dir / "raw"
+    raw_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"outside": true}', encoding="utf-8")
+    link = raw_dir / "linked.json"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Symlink creation is not available: {exc}")
+
+    snapshot = {"schema_version": 1, "experiment": {"id": "test"}}
+    manifest_path = run_dir / "manifest.json"
+    write_json_atomic(manifest_path, {
+        "run_id": "symlink-run",
+        "experiment_id": "test",
+        "definition_snapshot": snapshot,
+        "definition_sha256": definition_sha256(snapshot),
+        "expected_outputs": [],
+        "artifacts": [{
+            "path": "raw/linked.json",
+            "sha256": sha256_file(outside),
+            "size_bytes": outside.stat().st_size,
+        }],
+    })
+    result = verify_manifest(manifest_path)
+    assert result["valid"] is False
+    assert any("Symlink artefak tidak dipercaya" in error for error in result["errors"])

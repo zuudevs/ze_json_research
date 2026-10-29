@@ -16,6 +16,7 @@ from .manifest import (
     collect_artifacts,
     sha256_file,
     utc_now,
+    verify_manifest,
     write_json_atomic,
 )
 from .paths import validate_external_data_dir
@@ -102,6 +103,7 @@ def run_experiment(
     data_dir: Path,
     registry_path: Path,
 ) -> Path:
+    run_started_at = utc_now()
     experiment = document["experiment"]
     experiment_id = experiment["id"]
     execution_definition = experiment["execution"]
@@ -221,7 +223,7 @@ def run_experiment(
         "registry_file_sha256": sha256_file(registry_path),
         "definition_snapshot": snapshot,
         "definition_sha256": fingerprint,
-        "started_at": source_info.get("captured_at", utc_now()),
+        "started_at": run_started_at,
         "finished_at": finished_at,
         "status": status,
         "verification_status": "PENDING",
@@ -246,5 +248,9 @@ def run_experiment(
     }
     manifest["artifacts"] = collect_artifacts(run_dir)
     manifest_path = run_dir / "manifest.json"
+    write_json_atomic(manifest_path, manifest)
+    verification = verify_manifest(manifest_path)
+    manifest["verification_status"] = verification["verification_status"]
+    manifest["verification_errors"] = verification["errors"]
     write_json_atomic(manifest_path, manifest)
     return manifest_path

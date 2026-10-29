@@ -67,12 +67,14 @@ experiment:
         direction: higher_is_better
 
   protocol:
-    design: interleaved_same_process
+    design: same_process_sequential
     require_same_workload: true
     require_same_measurement_contract: true
     notes: >
-      Pastikan pasangan benchmark benar-benar berjalan di executable dan
-      proses yang sama jika klaim memerlukan desain interleaved.
+      Template ini menjalankan satu executable sekali, tetapi runner tidak
+      menginterleave setiap iterasi antarvarian. Sebelum mengklaim perbandingan
+      interleaved, audit urutan registrasi benchmark dan gunakan harness yang
+      benar-benar menjalankan pasangan dengan desain tersebut.
 
   comparison:
     group: scanner-width

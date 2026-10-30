@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import re
@@ -25,7 +26,27 @@ class RegistryError(ValueError):
 
 
 def canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=_canonical_default,
+    )
+
+
+def _canonical_default(value: Any) -> str:
+    """Keep definition fingerprints stable for YAML-native date values.
+
+    YAML turns an unquoted ``accessed_at: 2026-10-30`` into a ``date``. The
+    value is legitimately part of the definition, so it is serialized by its ISO
+    form instead of crashing the fingerprint computation.
+    """
+    if isinstance(value, (datetime.date, datetime.datetime, datetime.time)):
+        return value.isoformat()
+    raise TypeError(
+        f"Nilai definisi tidak dapat diserialkan secara deterministik: {type(value).__name__}"
+    )
 
 
 def definition_sha256(document: dict[str, Any]) -> str:

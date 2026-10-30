@@ -1,9 +1,9 @@
-schema_version: 1
+﻿schema_version: 1
 
 experiment:
   id: correctness-gtest-suite
   title: Product correctness suite for ze_json
-  status: draft
+  status: approved_for_run
   categories:
     - correctness
     - json-scanning
@@ -59,21 +59,27 @@ experiment:
       title: ze_json Google Test suite
       url: https://github.com/zuudevs/ze_json/blob/main/tests/CMakeLists.txt
       locator: add_test_target registrations and gtest_discover_tests
-      accessed_at: null
+      accessed_at: "2026-10-30"
       evidence_note: >
-        Tinjau commit yang akan diuji untuk memastikan target yang benar-benar
-        dibangun dan dijalankan sesuai daftar pada execution.steps.
-      review_status: unreviewed
+        Diperiksa pada commit 174c96a: 7 target didaftarkan lewat add_test_target
+        (scanner, document, object, number, session, array, path) dan
+        json_checker_test lewat subdirektori JSON_checker_test. Kedelapan
+        dibangun dari konfigurasi pada execution.steps dan menghasilkan biner di
+        path yang dideklarasikan; kedelapan dijalankan dengan 51 kasus dan
+        seluruhnya lulus. Tidak ada target lain yang didaftarkan di tests/.
+      review_status: reviewed
     - id: REF-CORPUS-DIGESTS
       source_type: local_file
       title: SHA-256 digests for the json.org checker corpus
       url: null
       locator: scripts/research/dataset-digests.py --output <temp> samples/JSON_checker
-      accessed_at: null
+      accessed_at: "2026-10-30"
       evidence_note: >
-        Digest direktori dihitung dari 37 berkas pada samples/JSON_checker pada
-        commit yang diuji. Runner menolak run bila digest direktori berubah.
-      review_status: unreviewed
+        Diperiksa pada commit 174c96a: direktori berisi 37 berkas (3 pass,
+        33 fail, README.md) dengan digest direktori
+        6ad31dcc343530e57814c8cc3c3f11939f6c51955791718be77305cf98924b46,
+        yang identik dengan dataset_sha256 workload pada definisi ini.
+      review_status: reviewed
 
   metrics:
     primary:

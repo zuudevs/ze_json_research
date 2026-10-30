@@ -1,9 +1,9 @@
-schema_version: 1
+﻿schema_version: 1
 
 experiment:
   id: scanner-width-comparison
   title: Scanner8 versus Scanner64, plus frozen replicas, in one process
-  status: draft
+  status: approved_for_run
   categories:
     - performance
     - json-scanning
@@ -75,34 +75,39 @@ experiment:
       title: ze_json scanner benchmark implementation
       url: https://github.com/zuudevs/ze_json/blob/main/benchmarks/scanner_benchmark/main.cpp
       locator: MAKE_SCANNER_BENCHMARK, MAKE_REPLICA_BENCHMARK, and BM_Scanner*_Synth registrations
-      accessed_at: null
+      accessed_at: "2026-10-30"
       evidence_note: >
-        Tinjau file pada commit source yang akan diuji. Referensi ini menunjuk
-        implementasi benchmark; referensi ini sendiri tidak membuktikan bahwa
-        satu varian lebih cepat.
-      review_status: unreviewed
+        Diperiksa pada commit 174c96a: 25 registrasi terdaftar (10 benchmark
+        dataset Scanner8/Scanner64, 2 payload sintetis, 9 replika beku), dan
+        lokasi dataset telah diperbaiki ke samples/commons sehingga tidak ada
+        kasus yang lagi di-SkipWithError. Referensi ini menunjuk implementasi
+        benchmark; ia tidak membuktikan bahwa satu varian lebih cepat.
+      review_status: reviewed
     - id: REF-DATASET-DIGESTS
       source_type: local_file
       title: Dataset SHA-256 digests for samples/commons
       url: null
       locator: scripts/research/dataset-digests.json
-      accessed_at: null
+      accessed_at: "2026-10-30"
       evidence_note: >
-        Nilai dataset_sha256 pada definisi ini diambil dari berkas tersebut,
-        yang dihasilkan oleh scripts/research/dataset-digests.py dari checkout
-        yang diuji. Runner menolak run bila digest file berbeda dari yang
-        tercatat di sini.
-      review_status: unreviewed
+        Diperiksa pada commit 174c96a: 10 berkas dataset di samples/commons
+        dengan set_sha256 0012df6c30a89e0b026750dfba0489551596925e96f2737816d05b98744e5cf6,
+        dan setiap dataset_sha256 pada definisi ini berasal dari berkas itu.
+        Nilainya dihitung ulang saat run dan mismatch membatalkan run.
+      review_status: reviewed
     - id: REF-CORRECTNESS-SUITE
       source_type: source_code
       title: ze_json Google Test suite
       url: https://github.com/zuudevs/ze_json/blob/main/tests
       locator: scanner_test, document_test, object_test, number_test, session_test, array_test, path_test, json_checker_test
-      accessed_at: null
+      accessed_at: "2026-10-30"
       evidence_note: >
-        Menunjuk suite test produk. Gate pada definisi ini hanya menerima run
-        korektness berstatus VERIFIED pada commit source yang identik.
-      review_status: unreviewed
+        Diperiksa pada commit 174c96a: 7 executable ditambahkan oleh
+        tests/CMakeLists.txt dan json_checker_test oleh
+        tests/JSON_checker_test/CMakeLists.txt; kedelapan dibangun dan dijalankan
+        dengan total 51 kasus lulus. Gate pada definisi ini hanya menerima run
+        korektness VERIFIED pada commit source yang identik.
+      review_status: reviewed
 
   metrics:
     primary:

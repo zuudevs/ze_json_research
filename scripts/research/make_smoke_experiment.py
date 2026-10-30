@@ -181,4 +181,6 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    # main() does its own positional handling, so hand it argv without the
+    # program name.
+    raise SystemExit(main(sys.argv[1:]))

@@ -19,6 +19,7 @@ ALLOWED_ROLES = {"baseline", "candidate", "control", "replica", "other"}
 ALLOWED_EXECUTION_MODES = {"native", "script"}
 ID_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$")
 DATASET_PLACEHOLDER = "{dataset}"
+CASE_PLACEHOLDER = "{case}"
 
 
 class RegistryError(ValueError):
@@ -241,18 +242,34 @@ def validate_experiment(
         pattern = variant.get("benchmark_name_pattern")
         if not _nonempty(pattern):
             continue
-        if DATASET_PLACEHOLDER in pattern:
+        templated = DATASET_PLACEHOLDER in pattern or CASE_PLACEHOLDER in pattern
+        if templated:
+            # Only the workloads this variant actually applies to need a token.
+            effective = variant.get("workloads") or [
+                workload.get("id")
+                for workload in workload_list
+                if isinstance(workload, dict)
+            ]
             for workload in workload_list:
-                if not isinstance(workload, dict) or workload.get("id") not in workload_tokens:
+                if not isinstance(workload, dict):
+                    continue
+                if workload.get("id") not in effective:
+                    continue
+                if workload.get("id") not in workload_tokens:
                     errors.append(
-                        f"Varian {variant.get('id')!r} memakai pola {DATASET_PLACEHOLDER}; "
+                        f"Varian {variant.get('id')!r} memakai pola "
+                        f"{DATASET_PLACEHOLDER} atau {CASE_PLACEHOLDER}; "
                         f"workload {workload.get('id')!r} wajib memiliki benchmark_token "
                         "agar pemetaan hasil ke varian bersifat satu-ke-satu."
                     )
-        elif len(workload_list) > 1:
+        elif len(variant.get("workloads") or workload_list) > 1:
+            # A literal pattern is fine for a single effective workload. Count the
+            # restricted set when the variant declares one, not the global list.
+            effective = variant.get("workloads") or workload_list
             errors.append(
-                f"Varian {variant.get('id')!r} memakai pola literal tanpa {DATASET_PLACEHOLDER} "
-                f"padahal eksperimen memiliki {len(workload_list)} workload; hasil pemetaan akan ambigu."
+                f"Varian {variant.get('id')!r} memakai pola literal tanpa "
+                f"{DATASET_PLACEHOLDER} padahal berlaku untuk {len(effective)} workload; "
+                "hasil pemetaan akan ambigu."
             )
 
     metrics = experiment.get("metrics")

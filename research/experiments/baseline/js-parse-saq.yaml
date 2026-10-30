@@ -1,0 +1,273 @@
+schema_version: 1
+
+experiment:
+  id: js-parse-saq
+  title: JavaScript JSON.parse baseline on the SAQ Report payload snapshot
+  status: draft
+  categories:
+    - performance
+    - javascript-baseline
+
+  purpose: >
+    Merekam baseline JavaScript `JSON.parse(rawPayload)` atas snapshot enam
+    payload SAQ Report, dengan kontrak pengukuran dan provenance run yang sama
+    seperti eksperimen C++.
+
+  motivation: >
+    Baseline JS sebelumnya dijalankan tanpa manifest run. Tanpa pencatatan versi
+    Node, konfigurasi iterasi, dan digest payload, angka µs/op tidak bisa
+    dipertanggungjawabkan atau dibandingkan dengan pengukuran lain.
+
+  research_question: >
+    Berapa latency dan throughput `JSON.parse` untuk masing-masing dari enam
+    payload pada snapshot yang tercatat, dengan konfigurasi iterasi yang sama?
+
+  hypotheses:
+    - id: H1
+      statement: >
+        Payload dengan struktur paling besar membutuhkan waktu parse terpanjang.
+        Arah dan besaran ditentukan dari data.
+      metric: median_us_per_op
+      expected_direction: increasing_with_size
+
+  assumptions:
+    - Snapshot dummy dibangkitkan dari repo saq-report dengan generateId() resmi.
+    - Konfigurasi iterasi direkam melalui env yang dideklarasikan.
+
+  limitations:
+    - "Snapshot ini bertipe synthetic_dummy - satu rekaman dummy per repositori. Ini BUKAN sampel representatif dari data produksi SAQ Report, sehingga angka di sini hanya untuk karakterisasi parser dan uji integrasi."
+    - "Operasi yang diukur hanya JSON.parse; tidak mengukur ze_json, cloneJson, pemuatan database, atau jaringan."
+
+  research_basis:
+    - id: BASIS-JS-001
+      basis_type: internal_implementation
+      statement: >
+        benchmarks/json_baseline/ mencatat waktu JSON.parse berulang dalam batch,
+        dengan payload dan digest yang distaging ke dalam run directory.
+      reference_ids:
+        - REF-JS-BASELINE-README
+        - REF-JS-SAMPLE-MANIFEST
+    - id: BASIS-CORRECTNESS-001
+      basis_type: internal_implementation
+      statement: >
+        Baseline JS juga perlu bukti korektness pada commit yang sama sebelum
+        klaim apa pun dikaitkan dengannya.
+      reference_ids:
+        - REF-CORRECTNESS-SUITE
+
+  references:
+    - id: REF-JS-BASELINE-README
+      source_type: source_code
+      title: SAQ Report JSON.parse baseline
+      url: https://github.com/zuudevs/ze_json/blob/main/benchmarks/json_baseline/README.md
+      locator: Measurement semantics and ze_json_research execution settings
+      accessed_at: "2026-10-30"
+      evidence_note: >
+        Diperiksa pada commit terkini: operasi hanya JSON.parse; region terukur
+        adalah pemanggilan JSON.parse berulang di dalam batch; HTTP, SHA-256,
+        validasi korektness, warmup, dan penulisan berkas dikecualikan.
+      review_status: reviewed
+    - id: REF-JS-SAMPLE-MANIFEST
+      source_type: local_file
+      title: SAQ Report sample manifest (synthetic dummy snapshot)
+      locator: samples/saq-report/manifest.json
+      accessed_at: "2026-10-30"
+      evidence_note: >
+        Manifest mencatat snapshot_id, capture_method, dan payload_sha256 tiap
+        berkas. dataset_kind bernilai synthetic_dummy; keterbatasan ini disalin
+        ke limitations definisi ini agar tidak luput saat angka dikutip.
+      review_status: reviewed
+    - id: REF-CORRECTNESS-SUITE
+      source_type: source_code
+      title: ze_json Google Test suite
+      url: https://github.com/zuudevs/ze_json/blob/main/tests
+      locator: gtest executables under tests/
+      accessed_at: "2026-10-30"
+      evidence_note: >
+        Gate korektness hanya menerima run VERIFIED pada commit source identik,
+        termasuk snapshot sampel yang dipakai run ini.
+      review_status: reviewed
+
+  metrics:
+    primary:
+      name: median_us_per_op
+      unit: us/op
+      direction: lower_is_better
+    secondary:
+      - name: bytes_per_second
+        direction: higher_is_better
+      - name: coefficient_of_variation_percent
+        direction: lower_is_better
+
+  protocol:
+    design: same_process_sequential
+    require_same_workload: true
+    require_same_measurement_contract: true
+    notes: >
+      Enam payload dikirim ke satu proses server dan diukur berurutan. Satu baris
+      hasil per payload berisi min/median/mean/stdev/max, jumlah sample, dan
+      daftar sample per ronde. Unitnya mikrosekon per operasi, TIDAK dicampur
+      dengan ns/op C++.
+
+  comparison:
+    group: js-parse-saq
+    baseline: globalConfig
+    candidate: reports
+
+  correctness_gate:
+    id: gate-correctness-suite
+    experiment_id: correctness-gtest-suite
+    require_verification_status: VERIFIED
+    require_same_commit: true
+
+  variants:
+    - id: assistants
+      name: assistants payload
+      description: >
+        Satu varian per payload supaya setiap baris hasil menunjuk tepat satu
+        beban kerja, bukan dikelompokkan menjadi satu median gabungan.
+      comparison_role: other
+      lifecycle_status: experimental
+      measurement_contract_id: json-parse-only-v1
+      benchmark_name_pattern: "JSON.parse/{dataset}"
+      workloads: [assistants]
+
+    - id: courses
+      name: courses payload
+      comparison_role: other
+      lifecycle_status: experimental
+      measurement_contract_id: json-parse-only-v1
+      benchmark_name_pattern: "JSON.parse/{dataset}"
+      workloads: [courses]
+
+    - id: lecturers
+      name: lecturers payload
+      comparison_role: other
+      lifecycle_status: experimental
+      measurement_contract_id: json-parse-only-v1
+      benchmark_name_pattern: "JSON.parse/{dataset}"
+      workloads: [lecturers]
+
+    - id: schedules
+      name: schedules payload
+      comparison_role: other
+      lifecycle_status: experimental
+      measurement_contract_id: json-parse-only-v1
+      benchmark_name_pattern: "JSON.parse/{dataset}"
+      workloads: [schedules]
+
+    - id: reports
+      name: reports payload
+      comparison_role: candidate
+      lifecycle_status: experimental
+      measurement_contract_id: json-parse-only-v1
+      benchmark_name_pattern: "JSON.parse/{dataset}"
+      workloads: [reports]
+
+    - id: globalConfig
+      name: globalConfig payload
+      comparison_role: baseline
+      lifecycle_status: experimental
+      measurement_contract_id: json-parse-only-v1
+      benchmark_name_pattern: "JSON.parse/{dataset}"
+      workloads: [globalConfig]
+
+  workloads:
+    - id: assistants
+      name: assistants.json (dummy)
+      benchmark_token: assistants
+      dataset_path: samples/saq-report/assistants.json
+      dataset_sha256: 7de667957e4849c731b86a6c5b2e442b70557aa78b5cfe46d90d9334ed804d5a
+      parameters:
+        payload_bytes_utf8: 140
+        root_type: array
+
+    - id: courses
+      name: courses.json (dummy)
+      benchmark_token: courses
+      dataset_path: samples/saq-report/courses.json
+      dataset_sha256: 165c34396d5bf09085fcb6845fab03c201a9eb0ee4c5d47a3f08869678366900
+      parameters:
+        payload_bytes_utf8: 201
+        root_type: array
+
+    - id: lecturers
+      name: lecturers.json (dummy)
+      benchmark_token: lecturers
+      dataset_path: samples/saq-report/lecturers.json
+      dataset_sha256: 36fee3475748ab55c47ccc5f1e01a7ee26234ab59753872b738b2cdbea554533
+      parameters:
+        payload_bytes_utf8: 163
+        root_type: array
+
+    - id: schedules
+      name: schedules.json (dummy)
+      benchmark_token: schedules
+      dataset_path: samples/saq-report/schedules.json
+      dataset_sha256: aa912718e5724bd4cd25152e7524ffd627b44f92542d74c0f58b62dc4c6b4d01
+      parameters:
+        payload_bytes_utf8: 192
+        root_type: array
+
+    - id: reports
+      name: reports.json (dummy)
+      benchmark_token: reports
+      dataset_path: samples/saq-report/reports.json
+      dataset_sha256: 2c06b2dfd8d6048a3645d1da62b3e3992369ee20dc5ad5a03723f1e7abe8bcae
+      parameters:
+        payload_bytes_utf8: 428
+        root_type: array
+
+    - id: globalConfig
+      name: globalConfig.json (dummy)
+      benchmark_token: globalConfig
+      dataset_path: samples/saq-report/globalConfig.json
+      dataset_sha256: 7b293959679e352f27cd486f9c7e1d2ac5bc7f615eb7abf6942558f8b566c21d
+      parameters:
+        payload_bytes_utf8: 261
+        root_type: object
+
+  measurement_contracts:
+    - id: json-parse-only-v1
+      name: JavaScript JSON.parse baseline
+      operation: Repeatedly parse the supplied payload with JSON.parse.
+      includes:
+        - repeated JSON.parse calls inside each measured batch
+      excludes:
+        - HTTP transfer and body collection
+        - SHA-256 verification and the correctness pre-check
+        - structural profiling, warmup, result serialization, and file writes
+      notes: >
+        Satu baris per payload memuat median dari ronde terukur, bukan satu
+        panggilan tunggal bertimestamp.
+
+  execution:
+    preset: null
+    mode: script
+    require_clean_worktree: true
+    steps:
+      - id: run
+        command:
+          - node
+          - "{source_dir}/benchmarks/json_baseline/run-baseline.js"
+          - --run-dir
+          - "{run_dir}"
+          - --run-id
+          - "{run_id}"
+    env_passthrough:
+      - SAQ_BENCH_ITERATIONS
+      - SAQ_BENCH_WARMUP_ITERATIONS
+      - SAQ_BENCH_ROUNDS
+      - SAQ_BENCH_PORT
+      - SAQ_BENCH_HOST
+    expected_outputs:
+      - baseline-server/manifest.json
+      - raw/benchmark_results.jsonl
+      - metadata/saq-report-sample-manifest.json
+      - inputs/saq-report/manifest.json
+      - inputs/saq-report/assistants.json
+      - inputs/saq-report/courses.json
+      - inputs/saq-report/lecturers.json
+      - inputs/saq-report/schedules.json
+      - inputs/saq-report/reports.json
+      - inputs/saq-report/globalConfig.json

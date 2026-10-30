@@ -75,6 +75,13 @@ measurement contract is complete.
 Literal braces are written `{{` and `}}` because `{name}` is reserved for
 placeholders. An unknown `{name}` is rejected instead of passed through.
 
+## String versus mapping in list items
+
+A plain-scalar list item that contains `": "` is parsed by YAML as a mapping, not
+as a string. `- Because it is slower: really` becomes a one-key dict and the
+validator rejects it with "harus berupa array string". Quote such items, or drop
+the colon. The same applies to any unquoted field value.
+
 ## Workload tokens and mapping honesty
 
 A variant's `benchmark_name_pattern` may contain `{dataset}`. Every workload

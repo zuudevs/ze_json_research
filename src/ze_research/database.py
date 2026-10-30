@@ -88,7 +88,7 @@ def database_status(database_path: Path) -> dict[str, Any]:
         counts: dict[str, int] = {}
         for table in (
             "experiments", "experiment_versions", "research_runs", "executions",
-            "artifacts", "benchmark_results", "test_results",
+            "artifacts", "benchmark_results", "test_results", "js_parse_results",
         ):
             exists = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
@@ -214,8 +214,10 @@ def persist_definition(connection: sqlite3.Connection, document: dict[str, Any])
             # how a synthetic case gets mislabelled as a real dataset.
             name_pattern = variant["benchmark_name_pattern"]
             token = workload.get("benchmark_token")
-            if isinstance(token, str) and token and "{dataset}" in name_pattern:
-                name_pattern = name_pattern.replace("{dataset}", token)
+            if isinstance(token, str) and token:
+                for placeholder in ("{dataset}", "{case}"):
+                    if placeholder in name_pattern:
+                        name_pattern = name_pattern.replace(placeholder, token)
             spec_id = "spec-" + hashlib.sha256(
                 f"{version_id}|{variant['id']}|{workload['id']}|{variant['measurement_contract_id']}".encode("utf-8")
             ).hexdigest()[:24]

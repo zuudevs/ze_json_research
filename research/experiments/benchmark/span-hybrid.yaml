@@ -1,0 +1,365 @@
+schema_version: 1
+
+experiment:
+  id: span-hybrid
+  title: Span scanning slope and the hybrid-versus-prehybrid pair on real datasets
+  status: draft
+  categories:
+    - performance
+    - json-scanning
+
+  purpose: >
+    Merekam dua ranah pengukuran span. Pertama, katalog slope marginal per-byte
+    untuk scanner64 lawan empat replika SWAR/ByteLoop pada span sintetis dengan
+    padding bervariasi. Kedua, pasangan bersebelahan library probe-hybrid lawan
+    replika pra-hybrid beku pada tujuh dataset nyata.
+
+  motivation: >
+    Pasangan terdaftar bersebelahan adalah cara wajar mengatasi getaran jam
+    antar-proses yang terdokumentasi 15–45%. Tanpa pencatatan per dataset,
+    klaim perbaikan span tidak bisa dibedakan dari klaim akibat padding.
+
+  research_question: >
+    Berapa biaya marginal per-byte untuk tiap algoritma span pada tingkat
+    padding yang sama, dan berapa selisih probe-hybrid terhadap baseline
+    pra-hybrid pada setiap dataset nyata?
+
+  hypotheses:
+    - id: H1
+      statement: >
+        Replika hybrid lebih murah daripada replika ByteLoop pada span padat,
+        karena probe adaptif memotong pemeriksaan whitespace.
+      metric: real_time
+      expected_direction: lower
+    - id: H2
+      statement: >
+        Library scanner64 kini probe-hybrid lebih cepat daripada replika
+        pra-hybrid beku pada dataset nyata. Arah dan besaran ditentukan data.
+      metric: real_time
+      expected_direction: lower
+
+  assumptions:
+    - Span sintetis dibangun di dalam proses; hanya padding yang menskalakan.
+    - Dataset nyata dibaca dari samples/commons.
+
+  limitations:
+    - "Titik padding berbeda per algoritma - replika tidak terdaftar pada Pad 0."
+    - "Slope dihitung di analisis dari median per padding, bukan dari satu angka absolut lintas proses."
+
+  research_basis:
+    - id: BASIS-SPAN-001
+      basis_type: internal_implementation
+      statement: >
+        benchmarks/span_iso_benchmark/main.cpp mendaftarkan kelompok
+        BM_SpanIso_* (katalog slope) dan pasangan BM_SpanReal_Hybrid_* lawan
+        BM_SpanReal_PreHybrid_* pada dataset nyata.
+      reference_ids:
+        - REF-SPAN-SOURCE
+        - REF-DATASET-DIGESTS
+    - id: BASIS-CORRECTNESS-001
+      basis_type: internal_implementation
+      statement: >
+        Klaim span perlu bukti korektness pada commit yang sama.
+      reference_ids:
+        - REF-CORRECTNESS-SUITE
+
+  references:
+    - id: REF-SPAN-SOURCE
+      source_type: source_code
+      title: ze_json span isolation benchmark implementation
+      url: https://github.com/zuudevs/ze_json/blob/main/benchmarks/span_iso_benchmark/main.cpp
+      locator: REGISTER_SPAN_GROUP and REGISTER_SPAN_REAL_PAIR registrations
+      accessed_at: "2026-10-30"
+      evidence_note: >
+        Diperiksa pada commit terkini: 48 registrasi; katalog memakai argumen Pad;
+        pasangan nyata terdaftar konsekutif per dataset. Replika hanya ada pada
+        Pad 8/64/256, scanner64 dan hybrid juga pada Pad 0.
+      review_status: reviewed
+    - id: REF-DATASET-DIGESTS
+      source_type: local_file
+      title: Dataset SHA-256 digests for samples/commons
+      locator: scripts/research/dataset-digests.json
+      accessed_at: "2026-10-30"
+      evidence_note: >
+        Digest tiap workload dataset diambil dari berkas itu dan diverifikasi ulang
+        oleh runner sebelum eksekusi.
+      review_status: reviewed
+    - id: REF-CORRECTNESS-SUITE
+      source_type: source_code
+      title: ze_json Google Test suite
+      url: https://github.com/zuudevs/ze_json/blob/main/tests
+      locator: gtest executables under tests/
+      accessed_at: "2026-10-30"
+      evidence_note: >
+        Gate korektness hanya menerima run VERIFIED pada commit source identik.
+      review_status: reviewed
+
+  metrics:
+    primary:
+      name: real_time
+      unit: ns/op
+      direction: lower_is_better
+    secondary:
+      - name: bytes_per_second
+        direction: higher_is_better
+
+  protocol:
+    design: same_process_sequential
+    require_same_workload: true
+    require_same_measurement_contract: true
+    notes: >
+      Seluruh registrasi pada satu executable dan dijalankan berurutan dalam satu
+      proses. Pasangan Hybrid/PreHybrid sengaja terdaftar konsekutif per dataset;
+      itu mitigasi getaran jam antar-registrasi, bukan interleaving per-iterasi.
+      Setiap titik padding dilaporkan sebagai baris terpisah.
+
+  comparison:
+    group: span-hybrid
+    baseline: span-real-prehybrid
+    candidate: span-real-hybrid
+
+  correctness_gate:
+    id: gate-correctness-suite
+    experiment_id: correctness-gtest-suite
+    require_verification_status: VERIFIED
+    require_same_commit: true
+
+  variants:
+    - id: span-scanner64-fillws
+      name: Scanner64, whitespace-dominant span
+      description: Baseline slope tanpa replika, span diisi whitespace.
+      comparison_role: baseline
+      lifecycle_status: approved
+      measurement_contract_id: span-catalog-v1
+      benchmark_name_pattern: "BM_SpanIso_Scanner64_FillWS"
+      workloads: [span-catalog-sweep]
+
+    - id: span-scanner64-fillnum
+      name: Scanner64, number-dominant span
+      description: Baseline slope tanpa replika, span diisi angka.
+      comparison_role: baseline
+      lifecycle_status: approved
+      measurement_contract_id: span-catalog-v1
+      benchmark_name_pattern: "BM_SpanIso_Scanner64_FillNum"
+      workloads: [span-catalog-sweep]
+
+    - id: span-byteloop-fillws
+      name: ByteLoop replica, whitespace-dominant span
+      comparison_role: replica
+      lifecycle_status: frozen
+      measurement_contract_id: span-catalog-v1
+      benchmark_name_pattern: "BM_SpanIso_ByteLoopReplica_FillWS"
+      workloads: [span-catalog-sweep]
+
+    - id: span-byteloop-fillnum
+      name: ByteLoop replica, number-dominant span
+      comparison_role: replica
+      lifecycle_status: frozen
+      measurement_contract_id: span-catalog-v1
+      benchmark_name_pattern: "BM_SpanIso_ByteLoopReplica_FillNum"
+      workloads: [span-catalog-sweep]
+
+    - id: span-swarset-fillws
+      name: SWAR set replica, whitespace-dominant span
+      comparison_role: replica
+      lifecycle_status: frozen
+      measurement_contract_id: span-catalog-v1
+      benchmark_name_pattern: "BM_SpanIso_SWARSetReplica_FillWS"
+      workloads: [span-catalog-sweep]
+
+    - id: span-swarset-fillnum
+      name: SWAR set replica, number-dominant span
+      comparison_role: replica
+      lifecycle_status: frozen
+      measurement_contract_id: span-catalog-v1
+      benchmark_name_pattern: "BM_SpanIso_SWARSetReplica_FillNum"
+      workloads: [span-catalog-sweep]
+
+    - id: span-swaradvance-fillws
+      name: SWAR advance replica, whitespace-dominant span
+      comparison_role: replica
+      lifecycle_status: frozen
+      measurement_contract_id: span-catalog-v1
+      benchmark_name_pattern: "BM_SpanIso_SWARAdvanceReplica_FillWS"
+      workloads: [span-catalog-sweep]
+
+    - id: span-swaradvance-fillnum
+      name: SWAR advance replica, number-dominant span
+      comparison_role: replica
+      lifecycle_status: frozen
+      measurement_contract_id: span-catalog-v1
+      benchmark_name_pattern: "BM_SpanIso_SWARAdvanceReplica_FillNum"
+      workloads: [span-catalog-sweep]
+
+    - id: span-swarhybrid-fillws
+      name: SWAR hybrid replica, whitespace-dominant span
+      description: Replika probe adaptif; pembanding biaya terhadap scanner64.
+      comparison_role: candidate
+      lifecycle_status: frozen
+      measurement_contract_id: span-catalog-v1
+      benchmark_name_pattern: "BM_SpanIso_SWARHybridReplica_FillWS"
+      workloads: [span-catalog-sweep]
+
+    - id: span-swarhybrid-fillnum
+      name: SWAR hybrid replica, number-dominant span
+      comparison_role: candidate
+      lifecycle_status: frozen
+      measurement_contract_id: span-catalog-v1
+      benchmark_name_pattern: "BM_SpanIso_SWARHybridReplica_FillNum"
+      workloads: [span-catalog-sweep]
+
+    - id: span-real-hybrid
+      name: Library scanner64, hybrid span probe
+      description: Jalur library saat ini pada dataset nyata.
+      comparison_role: candidate
+      lifecycle_status: approved
+      measurement_contract_id: span-real-v1
+      benchmark_name_pattern: "BM_SpanReal_Hybrid_{dataset}"
+      workloads:
+        - github-events
+        - mesh
+        - twitter
+        - citm-catalog
+        - update-center
+        - canada
+        - jeopardy
+
+    - id: span-real-prehybrid
+      name: Pre-hybrid span replica (v0.1.6 frozen)
+      description: Baseline byte-per-byte pra-hybrid yang dibekukan.
+      comparison_role: baseline
+      lifecycle_status: frozen
+      measurement_contract_id: span-real-v1
+      benchmark_name_pattern: "BM_SpanReal_PreHybrid_{dataset}"
+      workloads:
+        - github-events
+        - mesh
+        - twitter
+        - citm-catalog
+        - update-center
+        - canada
+        - jeopardy
+
+  workloads:
+    - id: span-catalog-sweep
+      name: Synthetic span catalog sweep
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        sweep: Pad
+        points: [0, 8, 64, 256]
+        notes: >
+          Span sintetis dibangun di dalam proses; hanya padding yang menskalakan.
+          Titik padding dilaporkan terpisah, lalu slope dihitung di analisis.
+
+    - id: github-events
+      name: GitHub Events JSON dataset
+      benchmark_token: github_events
+      dataset_path: samples/commons/github_events.json
+      dataset_sha256: cfdc77cb9208ad72b049ed5a87fdc2f4bba49d70cebefeb2fc61522c3afaec95
+      parameters: {}
+
+    - id: mesh
+      name: Mesh JSON dataset
+      benchmark_token: mesh
+      dataset_path: samples/commons/mesh.json
+      dataset_sha256: 710d5562115006eb30c2be50143f449414a26bad63c955fb574a8dd100b43f4c
+      parameters: {}
+
+    - id: twitter
+      name: Twitter JSON dataset
+      benchmark_token: twitter
+      dataset_path: samples/commons/twitter.json
+      dataset_sha256: 49d38a0b3db9557ae7fa1cf094dabc1205b65fb0a61cc1f8e7fb50864d0104a9
+      parameters: {}
+
+    - id: citm-catalog
+      name: CITM catalog JSON dataset
+      benchmark_token: citm_catalog
+      dataset_path: samples/commons/citm_catalog.json
+      dataset_sha256: cab62e56bcf8540f65df42bffdf3cce279d68e2d5dfbeb46120dea982032fb12
+      parameters: {}
+
+    - id: update-center
+      name: Update center JSON dataset
+      benchmark_token: update_center
+      dataset_path: samples/commons/update-center.json
+      dataset_sha256: 72d59197d175ec613206a723082d7fde98540677814d0d2f2600265dd7848a3f
+      parameters: {}
+
+    - id: canada
+      name: Canada JSON dataset
+      benchmark_token: canada
+      dataset_path: samples/commons/canada.json
+      dataset_sha256: bfbc12b8b6da35cdcc15046304be1739a82a335de17ef9959ea3dd75225467a4
+      parameters: {}
+
+    - id: jeopardy
+      name: Jeopardy JSON dataset
+      benchmark_token: jeopardy
+      dataset_path: samples/commons/jeopardy.json
+      dataset_sha256: e93247fed3511e025b9f4c7d3a6ab3334c77546401fb1d64f4d558af09506308
+      parameters: {}
+
+  measurement_contracts:
+    - id: span-catalog-v1
+      name: Span isolation catalog
+      operation: Scan a synthetic span of the declared padding with the selected implementation.
+      includes:
+        - work performed inside the registered span loop
+      excludes:
+        - span construction before the timed loop
+        - conclusions about real datasets
+      notes: >
+        Slope dihitung dari median per titik padding pada analisis, bukan dari
+        satu angka absolut.
+
+    - id: span-real-v1
+      name: Span scan on real datasets
+      operation: Scan the supplied real dataset with the selected span implementation.
+      includes:
+        - work performed inside the registered span loop
+      excludes:
+        - dataset loading and the pre-timed verification scan
+        - conclusions about the full parser performance
+      notes: >
+        Hybrid dan PreHybrid terdaftar konsekutif per dataset; perbandingan hanya
+        sah pada dataset dan proses yang sama.
+
+  execution:
+    preset: native-release
+    mode: native
+    require_clean_worktree: true
+    executable_path: "{build_dir}/benchmarks/span_iso_benchmark"
+    configure_command:
+      - cmake
+      - -S
+      - "{source_dir}"
+      - -B
+      - "{build_dir}"
+      - -G
+      - Ninja
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_C_COMPILER=clang
+      - -DCMAKE_CXX_COMPILER=clang++
+      - -DCMAKE_CXX_STANDARD=23
+      - -DCMAKE_CXX_STANDARD_REQUIRED=ON
+      - -DCMAKE_CXX_EXTENSIONS=OFF
+      - -DCMAKE_CXX_FLAGS=-Wno-c2y-extensions
+      - -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - -DCMAKE_TOOLCHAIN_FILE={vcpkg_root}/scripts/buildsystems/vcpkg.cmake
+    build_command:
+      - cmake
+      - --build
+      - "{build_dir}"
+      - --target
+      - span_iso_benchmark
+    run_command:
+      - "{benchmark_executable}"
+      - "--benchmark_out={run_dir}/raw/span_iso_benchmark.json"
+      - --benchmark_out_format=json
+      - --benchmark_repetitions=1
+    env_passthrough:
+      - VCPKG_ROOT
+    expected_outputs:
+      - raw/span_iso_benchmark.json

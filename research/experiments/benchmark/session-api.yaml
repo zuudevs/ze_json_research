@@ -1,0 +1,525 @@
+schema_version: 1
+
+experiment:
+  id: session-api
+  title: Session API cost, size sweeps, scanner pipeline, and grammar validator pairs
+  status: draft
+  categories:
+    - performance
+    - json-session
+
+  purpose: >
+    Merekam biaya API Session pada tiga ranah: operasi dasar pada payload
+    sintetis, sapuan ukuran (session, path query, array read), dan pasangan
+    validator gramatikal Base vs Tapewalk pada dataset nyata.
+
+  motivation: >
+    Benchmark session mengandung banyak sapuan parameter (KiB, Idx, WxK). Tanpa
+    pencatatan per baris, sapuan itu runtuh menjadi satu median yang menyembunyikan
+    bentuk kurvanya. Run ini merekam setiap titik parameter secara terpisah.
+
+  research_question: >
+    Bagaimana biaya operasi Session berubah terhadap ukuran payload, lebar
+    object, dan jumlah elemen, serta berapa biaya validator gramatikal
+    tape-walk dibanding mode Base pada dataset yang sama?
+
+  hypotheses:
+    - id: H1
+      statement: >
+        Pipeline session dengan Scanner64 lebih murah daripada dengan Scanner8
+        pada payload yang sama (ukur pada benchmark yang terdaftar bersebelahan).
+      metric: real_time
+      expected_direction: lower
+    - id: H2
+      statement: >
+        Validator tape-walk lebih mahal daripada mode Base karena biaya menelusuri
+        kembali tape per entri. Arah ini harus dibaca dari data, bukan nama.
+      metric: real_time
+      expected_direction: higher
+    - id: H3
+      statement: >
+        Find field pada object lebar naik monoton terhadap jarak kunci
+        (pertama < tengah < terakhir).
+      metric: real_time
+      expected_direction: increasing_with_distance
+
+  assumptions:
+    - Sapuan parameter memakai payload sintetis yang dibangun di dalam proses.
+    - Pasangan GRAM membaca berkas dataset dari samples/commons.
+
+  limitations:
+    - Hasil berlaku pada konfigurasi build dan environment yang tercatat.
+    - Golongan parameter dicatat, bukan diklaim linear; bentuk kurva dibaca dari
+      laporan per baris.
+
+  research_basis:
+    - id: BASIS-SESSION-001
+      basis_type: internal_implementation
+      statement: >
+        benchmarks/session_benchmark/main.cpp mendaftarkan 64 registrasi: fixture
+        SessionFixture, sapuan parameter, pasangan Scanner8/Scanner64, dan 16
+        registrasi pasangan GRAM pada dataset nyata.
+      reference_ids:
+        - REF-SESSION-SOURCE
+        - REF-DATASET-DIGESTS
+    - id: BASIS-CORRECTNESS-001
+      basis_type: internal_implementation
+      statement: >
+        Klaim performa session perlu bukti korektness pada commit yang sama.
+      reference_ids:
+        - REF-CORRECTNESS-SUITE
+
+  references:
+    - id: REF-SESSION-SOURCE
+      source_type: source_code
+      title: ze_json session benchmark implementation
+      url: https://github.com/zuudevs/ze_json/blob/main/benchmarks/session_benchmark/main.cpp
+      locator: SessionFixture, BM_CreateSession_*, BM_GRAM_Base_* and BM_GRAM_Tapewalk_*
+      accessed_at: "2026-10-30"
+      evidence_note: >
+        Diperiksa pada commit terkini: 64 registrasi terdaftar; sapuan parameter
+        memakai argumen KiB/Idx/WxK; pasangan GRAM membaca samples/commons;
+        gerbang start-up memakai korpus samples/JSON_checker.
+      review_status: reviewed
+    - id: REF-DATASET-DIGESTS
+      source_type: local_file
+      title: Dataset SHA-256 digests for samples/commons
+      locator: scripts/research/dataset-digests.json
+      accessed_at: "2026-10-30"
+      evidence_note: >
+        Nilai dataset_sha256 workload GRAM diambil dari berkas ini dan diverifikasi
+        ulang oleh runner sebelum eksekusi.
+      review_status: reviewed
+    - id: REF-CORRECTNESS-SUITE
+      source_type: source_code
+      title: ze_json Google Test suite
+      url: https://github.com/zuudevs/ze_json/blob/main/tests
+      locator: gtest executables under tests/
+      accessed_at: "2026-10-30"
+      evidence_note: >
+        Gate korektness hanya menerima run VERIFIED pada commit source identik.
+      review_status: reviewed
+
+  metrics:
+    primary:
+      name: real_time
+      unit: ns/op
+      direction: lower_is_better
+    secondary:
+      - name: bytes_per_second
+        direction: higher_is_better
+
+  protocol:
+    design: same_process_sequential
+    require_same_workload: true
+    require_same_measurement_contract: true
+    notes: >
+      Seluruh registrasi berada pada satu executable dan dijalankan berurutan
+      dalam satu proses. Pasangan Scanner8/Scanner64 dan Base/Tapewalk terdaftar
+      berurutan; itu mitigasi getaran jam antar-benchmark, bukan interleaving
+      per-iterasi. Titik parameter KiB/Idx/WxK TIDAK digabung: setiap baris
+      dilaporkan terpisah.
+
+  comparison:
+    group: session-api
+    baseline: gram-base
+    candidate: gram-tapewalk
+
+  correctness_gate:
+    id: gate-correctness-suite
+    experiment_id: correctness-gtest-suite
+    require_verification_status: VERIFIED
+    require_same_commit: true
+
+  variants:
+    - id: session-basic
+      name: SessionFixture basic operations
+      description: >
+        Sembilan operasi dasar: konstruksi pipeline, find/read satu dan tiga
+        field, baca seluruh array, dan empat varian path query.
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: session-fixture-v1
+      benchmark_name_pattern: "SessionFixture/{case}"
+      workloads:
+        - session-case-create-pipeline
+        - session-case-find-single
+        - session-case-find-three
+        - session-case-array-all
+        - session-case-path-flat
+        - session-case-path-nested
+        - session-case-path-array
+        - session-case-path-deep
+        - session-case-path-threetypes
+
+    - id: session-create-sizes
+      name: CreateSession size sweep
+      description: >
+        Biaya konstruksi session terhadap ukuran payload (sapuan KiB).
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: session-fixture-v1
+      benchmark_name_pattern: "BM_CreateSession_Sizes"
+      workloads: [session-size-sweep]
+
+    - id: session-pipeline-scanner8
+      name: CreateSession pipeline, Scanner8
+      description: Pipeline session dengan varian Scanner8 pada ukuran terindeks.
+      comparison_role: baseline
+      lifecycle_status: approved
+      measurement_contract_id: session-fixture-v1
+      benchmark_name_pattern: "BM_CreateSession_Pipeline_Scanner8"
+      workloads: [session-pipeline-payload]
+
+    - id: session-pipeline-scanner64
+      name: CreateSession pipeline, Scanner64
+      description: Pipeline session dengan varian Scanner64 pada ukuran terindeks.
+      comparison_role: candidate
+      lifecycle_status: approved
+      measurement_contract_id: session-fixture-v1
+      benchmark_name_pattern: "BM_CreateSession_Pipeline_Scanner64"
+      workloads: [session-pipeline-payload]
+
+    - id: session-rootwide-pathquery
+      name: Root-wide path query sweep
+      description: Kueri path terhadap root lebar (sapuan WxK).
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: session-fixture-v1
+      benchmark_name_pattern: "BM_RootWide_PathQuery"
+      workloads: [session-wide-sweep]
+
+    - id: session-arrayread-counted
+      name: Array read, counted
+      description: Pembacaan array berbasis jumlah elemen (sapuan Idx).
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: session-fixture-v1
+      benchmark_name_pattern: "BM_ArrayRead_Counted"
+      workloads: [session-array-sweep]
+
+    - id: session-arrayread-streaming
+      name: Array read, streaming
+      description: Pembacaan array streaming (sapuan Idx).
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: session-fixture-v1
+      benchmark_name_pattern: "BM_ArrayRead_Streaming"
+      workloads: [session-array-sweep]
+
+    - id: session-arrayindex-pathquery
+      name: Array index path query sweep
+      description: Kueri indeks array (sapuan WxK).
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: session-fixture-v1
+      benchmark_name_pattern: "BM_ArrayIndex_PathQuery"
+      workloads: [session-wide-sweep]
+
+    - id: session-create-utf8
+      name: CreateSession UTF-8 sweep
+      description: Konstruksi session untuk payload UTF-8 berskala.
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: session-fixture-v1
+      benchmark_name_pattern: "BM_CreateSession_Utf8"
+      workloads: [session-utf8-sweep]
+
+    - id: session-pipeline-separate-validator
+      name: Pipeline with separate validator
+      description: Pipeline dengan pass validasi terpisah (sapuan Idx).
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: session-fixture-v1
+      benchmark_name_pattern: "BM_Pipeline_SeparateValidator"
+      workloads: [session-pipeline-payload]
+
+    - id: session-pipeline-utf8-separate-validator
+      name: UTF-8 pipeline with separate validator
+      description: Pipeline UTF-8 dengan pass validasi terpisah (sapuan KiB).
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: session-fixture-v1
+      benchmark_name_pattern: "BM_Pipeline_Utf8_SeparateValidator"
+      workloads: [session-utf8-sweep]
+
+    - id: gram-base
+      name: Grammar validator, base mode
+      description: Validator gramatikal mode Base pada dataset nyata.
+      comparison_role: baseline
+      lifecycle_status: approved
+      measurement_contract_id: grammar-validator-v1
+      benchmark_name_pattern: "BM_GRAM_Base_{dataset}"
+      workloads:
+        - github-events
+        - mesh
+        - twitter
+        - citm-catalog
+        - update-center
+        - canada
+        - jeopardy
+        - synthetic
+
+    - id: gram-tapewalk
+      name: Grammar validator, tape-walk mode
+      description: Validator gramatikal mode tape-walk pada dataset nyata.
+      comparison_role: candidate
+      lifecycle_status: approved
+      measurement_contract_id: grammar-validator-v1
+      benchmark_name_pattern: "BM_GRAM_Tapewalk_{dataset}"
+      workloads:
+        - github-events
+        - mesh
+        - twitter
+        - citm-catalog
+        - update-center
+        - canada
+        - jeopardy
+        - synthetic
+
+  workloads:
+    - id: session-payload
+      name: Session fixture payload
+      benchmark_token: placeholder
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        origin: benchmarks/session_benchmark/main.cpp session fixture
+      notes: >
+        Digantikan oleh sembilan workload kasus di bawah; entri ini tetap ada
+        agar urutan penjelasan tidak memudar dan tidak lagi dipakai varian mana pun.
+
+    - id: session-case-create-pipeline
+      name: CreateSession_Pipeline
+      benchmark_token: CreateSession_Pipeline
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        origin: benchmarks/session_benchmark/main.cpp session fixture
+
+    - id: session-case-find-single
+      name: FindRead_SingleField
+      benchmark_token: FindRead_SingleField
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        origin: benchmarks/session_benchmark/main.cpp session fixture
+
+    - id: session-case-find-three
+      name: FindRead_ThreeFields
+      benchmark_token: FindRead_ThreeFields
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        origin: benchmarks/session_benchmark/main.cpp session fixture
+
+    - id: session-case-array-all
+      name: ArrayRead_AllElements
+      benchmark_token: ArrayRead_AllElements
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        origin: benchmarks/session_benchmark/main.cpp session fixture
+
+    - id: session-case-path-flat
+      name: PathQuery_Flat
+      benchmark_token: PathQuery_Flat
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        origin: benchmarks/session_benchmark/main.cpp session fixture
+
+    - id: session-case-path-nested
+      name: PathQuery_Nested
+      benchmark_token: PathQuery_Nested
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        origin: benchmarks/session_benchmark/main.cpp session fixture
+
+    - id: session-case-path-array
+      name: PathQuery_ArrayElement
+      benchmark_token: PathQuery_ArrayElement
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        origin: benchmarks/session_benchmark/main.cpp session fixture
+
+    - id: session-case-path-deep
+      name: PathQuery_Deep
+      benchmark_token: PathQuery_Deep
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        origin: benchmarks/session_benchmark/main.cpp session fixture
+
+    - id: session-case-path-threetypes
+      name: PathQuery_ThreeTypes
+      benchmark_token: PathQuery_ThreeTypes
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        origin: benchmarks/session_benchmark/main.cpp session fixture
+
+    - id: session-size-sweep
+      name: CreateSession size sweep points
+      benchmark_token: Sizes
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        sweep: KiB
+        notes: Titik parameter dilaporkan terpisah per baris, bukan dirata-ratakan.
+
+    - id: session-pipeline-payload
+      name: Pipeline session payload
+      benchmark_token: Pipeline
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        sweep: Idx
+
+    - id: session-wide-sweep
+      name: Wide root sweep points
+      benchmark_token: Wide
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        sweep: WxK
+
+    - id: session-array-sweep
+      name: Array sweep points
+      benchmark_token: Array
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        sweep: Idx
+
+    - id: session-utf8-sweep
+      name: UTF-8 sweep points
+      benchmark_token: Utf8
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        sweep: KiB
+
+    - id: github-events
+      name: GitHub Events JSON dataset
+      benchmark_token: github_events
+      dataset_path: samples/commons/github_events.json
+      dataset_sha256: cfdc77cb9208ad72b049ed5a87fdc2f4bba49d70cebefeb2fc61522c3afaec95
+      parameters: {}
+
+    - id: mesh
+      name: Mesh JSON dataset
+      benchmark_token: mesh
+      dataset_path: samples/commons/mesh.json
+      dataset_sha256: 710d5562115006eb30c2be50143f449414a26bad63c955fb574a8dd100b43f4c
+      parameters: {}
+
+    - id: twitter
+      name: Twitter JSON dataset
+      benchmark_token: twitter
+      dataset_path: samples/commons/twitter.json
+      dataset_sha256: 49d38a0b3db9557ae7fa1cf094dabc1205b65fb0a61cc1f8e7fb50864d0104a9
+      parameters: {}
+
+    - id: citm-catalog
+      name: CITM catalog JSON dataset
+      benchmark_token: citm_catalog
+      dataset_path: samples/commons/citm_catalog.json
+      dataset_sha256: cab62e56bcf8540f65df42bffdf3cce279d68e2d5dfbeb46120dea982032fb12
+      parameters: {}
+
+    - id: update-center
+      name: Update center JSON dataset
+      benchmark_token: update_center
+      dataset_path: samples/commons/update-center.json
+      dataset_sha256: 72d59197d175ec613206a723082d7fde98540677814d0d2f2600265dd7848a3f
+      parameters: {}
+
+    - id: canada
+      name: Canada JSON dataset
+      benchmark_token: canada
+      dataset_path: samples/commons/canada.json
+      dataset_sha256: bfbc12b8b6da35cdcc15046304be1739a82a335de17ef9959ea3dd75225467a4
+      parameters: {}
+
+    - id: jeopardy
+      name: Jeopardy JSON dataset
+      benchmark_token: jeopardy
+      dataset_path: samples/commons/jeopardy.json
+      dataset_sha256: e93247fed3511e025b9f4c7d3a6ab3334c77546401fb1d64f4d558af09506308
+      parameters: {}
+
+    - id: synthetic
+      name: Synthetic token-dense payload
+      benchmark_token: Synthetic
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        origin: benchmarks/session_benchmark/main.cpp get_gram_synthetic
+      notes: >
+        Payload dibangkitkan di dalam proses oleh generator token-padat; tanpa
+        berkas dataset yang dihash.
+
+  measurement_contracts:
+    - id: session-fixture-v1
+      name: Session API benchmark
+      operation: Run the registered Session benchmark for the declared payload.
+      includes:
+        - work performed inside the registered benchmark loop
+      excludes:
+        - fixture set-up outside the timed loop
+      notes: >
+        Sapuan parameter diukur sebagai titik terpisah; laporan memakai median
+        per baris (nama terdaftar plus argumen), bukan median gabungan.
+
+    - id: grammar-validator-v1
+      name: Grammar validator benchmark on real datasets
+      operation: >
+        Validate the supplied dataset with the selected grammar validator mode.
+      includes:
+        - work performed inside the registered validator loop
+      excludes:
+        - dataset loading and the accept-gate verification performed before timing
+      notes: >
+        Base dan Tapewalk memakai jalur yang berbeda; perbandingan hanya sah pada
+        dataset dan proses yang sama.
+
+  execution:
+    preset: native-release
+    mode: native
+    require_clean_worktree: true
+    executable_path: "{build_dir}/benchmarks/session_benchmark"
+    configure_command:
+      - cmake
+      - -S
+      - "{source_dir}"
+      - -B
+      - "{build_dir}"
+      - -G
+      - Ninja
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_C_COMPILER=clang
+      - -DCMAKE_CXX_COMPILER=clang++
+      - -DCMAKE_CXX_STANDARD=23
+      - -DCMAKE_CXX_STANDARD_REQUIRED=ON
+      - -DCMAKE_CXX_EXTENSIONS=OFF
+      - -DCMAKE_CXX_FLAGS=-Wno-c2y-extensions
+      - -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - -DCMAKE_TOOLCHAIN_FILE={vcpkg_root}/scripts/buildsystems/vcpkg.cmake
+    build_command:
+      - cmake
+      - --build
+      - "{build_dir}"
+      - --target
+      - session_benchmark
+    run_command:
+      - "{benchmark_executable}"
+      - "--benchmark_out={run_dir}/raw/session_benchmark.json"
+      - --benchmark_out_format=json
+      - --benchmark_repetitions=1
+    env_passthrough:
+      - VCPKG_ROOT
+    expected_outputs:
+      - raw/session_benchmark.json

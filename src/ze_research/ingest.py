@@ -36,14 +36,44 @@ def _duration_seconds(value: Any) -> float | None:
 
 
 def _normalize_benchmark_name(benchmark_name: str) -> str:
+    """Reduce a reported benchmark name to the registered name.
+
+    Two different slash conventions meet here:
+
+    - Google Benchmark appends option and argument groups to the name, for
+      example ``.../min_time:15.000`` or ``BM_SpanIso_Scanner64_FillWS/8``. Those
+      are not part of the registered name.
+    - A gtest-style fixture uses the slash as a separator, for example
+      ``ParserFixture/DocumentInitialization``. That slash *is* the name.
+
+    Only groups that look like an argument are removed: a ``Name:value`` pair or
+    a plain number. A bare identifier stays, so a fixture case name survives.
+    """
     normalized = re.sub(
         r"/(?:min_time|min_warmup_time|repeats|iterations|threads):[^/]+", "", benchmark_name
     )
-    # Google Benchmark appends "/<arg>" for ->Args()/->Arg() registrations,
-    # for example BM_SpanIso_Scanner64_FillWS/8. Those suffixes are not part of
-    # the declared benchmark name, so strip a trailing argument group.
-    normalized = re.sub(r"/.+$", "", normalized)
+    while True:
+        match = re.search(r"/([^/]*:[^/]*|\d+)$", normalized)
+        if match is None:
+            break
+        normalized = normalized[: match.start()]
     return normalized
+
+
+def _benchmark_argument_suffix(benchmark_name: str) -> str:
+    """The parameter part of a reported name, kept for row-level reporting.
+
+    Option groups such as ``/min_time:15.000`` are not parameters and must not
+    split a row, while a real argument such as ``/KiB:0`` must. Both are removed
+    before comparing against the normalized name.
+    """
+    without_options = re.sub(
+        r"/(?:min_time|min_warmup_time|repeats|iterations|threads):[^/]+", "", benchmark_name
+    )
+    normalized = _normalize_benchmark_name(benchmark_name)
+    if without_options.startswith(normalized):
+        return without_options[len(normalized):]
+    return ""
 
 
 def _benchmark_spec_match(
@@ -85,18 +115,24 @@ def _import_benchmark_json(
         spec_id, mapping_status = _benchmark_spec_match(row["name"], specs)
         run_type = row.get("run_type")
         iterations = row.get("iterations")
+        # Preserve the parameter (for example /KiB:0) so a report can keep a
+        # size sweep apart instead of averaging across its points.
+        argument_suffix = _benchmark_argument_suffix(row["name"])
+        normalized_name = _normalize_benchmark_name(row["name"])
         connection.execute(
             """INSERT OR IGNORE INTO benchmark_results(
                 execution_id, source_artifact_id, benchmark_name_raw, benchmark_spec_id,
                 mapping_status, run_type, iterations, real_time, cpu_time, time_unit,
-                bytes_per_second, items_per_second, error_occurred, error_message, raw_row_json)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                bytes_per_second, items_per_second, error_occurred, error_message,
+                benchmark_name_normalized, benchmark_argument, raw_row_json)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 execution_id, artifact_id, row["name"], spec_id, mapping_status, run_type,
                 iterations if isinstance(iterations, int) else None,
                 row.get("real_time"), row.get("cpu_time"), row.get("time_unit"),
                 row.get("bytes_per_second"), row.get("items_per_second"),
-                int(bool(row.get("error_occurred"))), row.get("error_message"), _json(row),
+                int(bool(row.get("error_occurred"))), row.get("error_message"),
+                normalized_name, argument_suffix, _json(row),
             ),
         )
         if connection.execute("SELECT changes()").fetchone()[0]:
@@ -196,6 +232,85 @@ def _import_gtest_json(
     return count
 
 
+def _number(payload: dict[str, Any], key: str) -> float | None:
+    value = payload.get(key)
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _integer(payload: dict[str, Any], key: str) -> int | None:
+    value = payload.get(key)
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _text(payload: dict[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _import_js_parse_jsonl(
+    file_path: Path,
+    *,
+    execution_id: str,
+    artifact_id: str,
+    run_id: str,
+    connection: sqlite3.Connection,
+) -> int:
+    """Import the JavaScript JSON.parse baseline JSON Lines file.
+
+    Each line is one fully summarized payload sample. The payload digest and
+    sample-manifest digest written by the harness are kept, so a JS number can
+    name the exact bytes it measured.
+    """
+    count = 0
+    try:
+        lines = file_path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise IngestError(f"JSONL baseline tidak dapat dibaca: {file_path}: {exc}") from exc
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise IngestError(f"Baris JSONL tidak valid di {file_path}: {exc}") from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("payload_id"), str):
+            raise IngestError(f"Baris JSONL tanpa payload_id di {file_path}")
+        cursor = connection.execute(
+            """INSERT OR IGNORE INTO js_parse_results(
+                execution_id, source_artifact_id, run_id, payload_id, parser, operation,
+                measurement_contract_id, root_type, payload_sha256, payload_bytes_utf8,
+                sample_manifest_sha256, snapshot_id, min_us_per_op, median_us_per_op,
+                mean_us_per_op, standard_deviation_us_per_op, max_us_per_op,
+                coefficient_of_variation_percent, ops_per_second, bytes_per_second,
+                mib_per_second, sample_count, iterations_per_sample, warmup_iterations,
+                time_unit, raw_row_json)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                execution_id, artifact_id, run_id, payload["payload_id"],
+                _text(payload, "parser") or "unknown",
+                _text(payload, "operation") or "unknown",
+                _text(payload, "measurement_contract_id"), _text(payload, "root_type"),
+                _text(payload, "payload_sha256"), _integer(payload, "payload_bytes_utf8"),
+                _text(payload, "sample_manifest_sha256"), _text(payload, "snapshot_id"),
+                _number(payload, "min_us_per_op"), _number(payload, "median_us_per_op"),
+                _number(payload, "mean_us_per_op"),
+                _number(payload, "standard_deviation_us_per_op"),
+                _number(payload, "max_us_per_op"),
+                _number(payload, "coefficient_of_variation_percent"),
+                _number(payload, "ops_per_second"), _number(payload, "bytes_per_second"),
+                _number(payload, "mib_per_second"), _integer(payload, "sample_count"),
+                _integer(payload, "iterations_per_sample"),
+                _integer(payload, "warmup_iterations"),
+                "us", _json(payload),
+            ),
+        )
+        if cursor.rowcount and connection.execute("SELECT changes()").fetchone()[0]:
+            count += 1
+    return count
+
+
 def ingest_manifest(
     manifest_path: Path, database_path: Path, *, verify: bool = True
 ) -> dict[str, Any]:
@@ -235,7 +350,7 @@ def ingest_manifest(
     database_path = database_path.expanduser().resolve()
     migrate(database_path)
 
-    result_counts = {"benchmark_results": 0, "test_results": 0}
+    result_counts = {"benchmark_results": 0, "test_results": 0, "js_parse_results": 0}
     with connect(database_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         existing = connection.execute(
@@ -372,9 +487,20 @@ def ingest_manifest(
             if artifact.get("kind") != "raw_result":
                 continue
             raw_path = (run_dir / relative).resolve()
-            if not raw_path.is_file() or raw_path.suffix.lower() != ".json":
+            if not raw_path.is_file():
                 continue
             if run_execution is None:
+                continue
+            if raw_path.suffix.lower() == ".jsonl":
+                result_counts["js_parse_results"] += _import_js_parse_jsonl(
+                    raw_path,
+                    execution_id=execution_id or run_execution,
+                    artifact_id=artifact_id,
+                    run_id=run_id,
+                    connection=connection,
+                )
+                continue
+            if raw_path.suffix.lower() != ".json":
                 continue
             specs = connection.execute(
                 "SELECT benchmark_spec_id, name_pattern FROM benchmark_specs "

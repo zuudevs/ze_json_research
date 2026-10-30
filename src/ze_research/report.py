@@ -23,7 +23,8 @@ REPORT_VERSION = "1.0"
 _ROW_SQL = """
 SELECT br.run_type, br.iterations, br.real_time, br.cpu_time, br.time_unit,
        br.bytes_per_second, br.error_occurred, br.mapping_status,
-       br.benchmark_name_raw, br.raw_row_json,
+       br.benchmark_name_raw, br.benchmark_name_normalized, br.benchmark_argument,
+       br.raw_row_json,
        ex.run_id, ex.purpose, ex.sequence_number,
        rr.started_at, rr.finished_at, rr.status, rr.verification_status,
        rr.manifest_path, rr.manifest_sha256, rr.definition_sha256, rr.gates_json,
@@ -60,6 +61,7 @@ def _json(value: Any) -> str:
 def _load_rows(database_path: Path, experiment_id: str) -> list[dict[str, Any]]:
     if not database_path.is_file():
         raise ReportError(f"Database tidak ditemukan: {database_path}")
+    migrate(database_path)
     connection = connect(database_path)
     try:
         rows = [dict(row) for row in connection.execute(_ROW_SQL, (experiment_id,)).fetchall()]
@@ -100,13 +102,17 @@ def _definition_protocol(database_path: Path, experiment_id: str) -> dict[str, A
 def _observation_key(row: dict[str, Any]) -> tuple[str, str]:
     """Stable key for one measured benchmark within one run.
 
-    Unmapped rows have no benchmark_spec_id, so they are keyed by their raw
-    benchmark name to keep them visible in the report instead of dropped.
+    Keyed by the registered name plus its parameter, not by the spec. A spec
+    deliberately covers a whole variant/workload combination, so using it would
+    merge the points of a size sweep into one meaningless median. Unmapped rows
+    have no spec either way, so they are keyed by their raw name to keep them
+    visible instead of dropped.
     """
     spec_id = row["benchmark_spec_id"]
-    if spec_id:
-        return (row["run_id"], spec_id)
-    return (row["run_id"], f"unmapped:{row['benchmark_name_raw']}")
+    normalized = row.get("benchmark_name_normalized") or row["benchmark_name_raw"]
+    argument = row.get("benchmark_argument") or ""
+    base = f"{spec_id or 'unmapped'}|{normalized}{argument}"
+    return (row["run_id"], base)
 
 
 def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -183,6 +189,9 @@ def build_report(
                 "run_id": run_id,
                 "benchmark_spec_id": sample["benchmark_spec_id"],
                 "mapping_status": sample["mapping_status"],
+                "benchmark_name": sample["benchmark_name_raw"],
+                "benchmark_name_normalized": sample["benchmark_name_normalized"],
+                "benchmark_argument": sample["benchmark_argument"],
                 "name_pattern": sample["name_pattern"],
                 "algorithm_id": sample["algorithm_id"],
                 "algorithm_name": sample["algorithm_name"],

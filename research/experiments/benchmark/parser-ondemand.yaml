@@ -1,0 +1,285 @@
+schema_version: 1
+
+experiment:
+  id: parser-ondemand
+  title: On-demand parser cost per payload shape
+  status: draft
+  categories:
+    - performance
+    - json-parsing
+
+  purpose: >
+    Mengukur biaya lapis on-demand Document untuk tiga bentuk payload berbeda
+    pada kontrak pengukuran yang sama: dokumen heterogen, object lebar 512
+    field, dan payload string plain vs escaped.
+
+  motivation: >
+    Benchmark parser belum pernah direkam lewat repo research, sehingga angka
+    per operasi tidak menyebut commit, hash binary, atau bentuk payload yang
+    benar-benar dipakai.
+
+  research_question: >
+    Bagaimana biaya masing-masing operasi parser (konstruksi Document,
+    find+read field, parse double, pencarian dalam object lebar, baca string
+    plain vs escaped) pada payload yang dideklarasikan?
+
+  hypotheses:
+    - id: H1
+      statement: >
+        Konstruksi Document jauh lebih murah daripada operasi find+parse, karena
+        konstruksi hanya menyiapkan cursor sedangkan operasi membaca nilai.
+        Arah dan besaran harus ditentukan dari data.
+      metric: real_time
+      expected_direction: lower
+    - id: H2
+      statement: >
+        Pencarian field dalam object lebar naik bersama jarak kunci
+        (pertama < tengah < terakhir) untuk pencarian linear.
+      metric: real_time
+      expected_direction: increasing_with_distance
+
+  assumptions:
+    - Payload dibangun di dalam proses oleh fixture, bukan dibaca dari file.
+    - Tape dan arena disiapkan di luar loop pengukuran.
+
+  limitations:
+    - Hasil berlaku pada payload fixture ini, bukan pada dataset nyata.
+    - Payload tidak punya digest berkas; identitasnya ditopang commit source dan
+      hash executable.
+
+  research_basis:
+    - id: BASIS-PARSER-001
+      basis_type: internal_implementation
+      statement: >
+        benchmarks/parser_benchmark/main.cpp mendaftarkan 3 fixture dan 9 kasus,
+        semuanya memakai payload konstan di dalam proses.
+      reference_ids:
+        - REF-PARSER-SOURCE
+        - REF-DATASET-DIGESTS
+    - id: BASIS-CORRECTNESS-001
+      basis_type: internal_implementation
+      statement: >
+        Angka parser hanya dapat dipertanggungjawabkan bila suite test produk
+        lulus pada commit yang sama.
+      reference_ids:
+        - REF-CORRECTNESS-SUITE
+
+  references:
+    - id: REF-PARSER-SOURCE
+      source_type: source_code
+      title: ze_json parser benchmark implementation
+      url: https://github.com/zuudevs/ze_json/blob/main/benchmarks/parser_benchmark/main.cpp
+      locator: ParserFixture, WideObjectFixture, StringReadFixture registrations
+      accessed_at: "2026-10-30"
+      evidence_note: >
+        Diperiksa pada commit terkini: 9 registrasi, payload konstan
+        (kJsonPayload, object 512 field, payload string plain/escaped), scan awal
+        di SetUp di luar region terukur. Tidak ada pembacaan berkas dataset.
+      review_status: reviewed
+    - id: REF-DATASET-DIGESTS
+      source_type: local_file
+      title: Dataset SHA-256 digests for samples/commons
+      locator: scripts/research/dataset-digests.json
+      accessed_at: "2026-10-30"
+      evidence_note: >
+        Dicatat untuk kelengkapan: eksperimen ini tidak membaca dataset mana pun,
+        sehingga tidak ada workload berdataset_path.
+      review_status: reviewed
+    - id: REF-CORRECTNESS-SUITE
+      source_type: source_code
+      title: ze_json Google Test suite
+      url: https://github.com/zuudevs/ze_json/blob/main/tests
+      locator: gtest executables under tests/
+      accessed_at: "2026-10-30"
+      evidence_note: >
+        Gate korektness hanya menerima run VERIFIED pada commit source identik.
+      review_status: reviewed
+
+  metrics:
+    primary:
+      name: real_time
+      unit: ns/op
+      direction: lower_is_better
+    secondary:
+      - name: bytes_per_second
+        direction: higher_is_better
+
+  protocol:
+    design: same_process_sequential
+    require_same_workload: true
+    require_same_measurement_contract: true
+    notes: >
+      Semua kasus terdaftar pada satu executable dan dijalankan berurutan dalam
+      satu proses, tanpa interleave per-iterasi antarvarian. Payload dibangun
+      sekali oleh fixture; scan awal dilakukan di luar loop.
+
+  comparison:
+    group: parser-ondemand
+
+  correctness_gate:
+    id: gate-correctness-suite
+    experiment_id: correctness-gtest-suite
+    require_verification_status: VERIFIED
+    require_same_commit: true
+
+  variants:
+    - id: parser-doc-init
+      name: DocumentInitialization
+      description: Konstruksi Document dan pengambilan root cursor.
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: parser-fixture-v1
+      benchmark_name_pattern: "ParserFixture/DocumentInitialization"
+      workloads: [ondemand-payload]
+
+    - id: parser-find-early
+      name: FindField_Early_And_ParseInt
+      description: find_field pada kunci pertama lalu get_int.
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: parser-fixture-v1
+      benchmark_name_pattern: "ParserFixture/FindField_Early_And_ParseInt"
+      workloads: [ondemand-payload]
+
+    - id: parser-parse-double
+      name: ParseDouble_Nested_Lemire
+      description: Telusuri object bersarang lalu parse double Lemire.
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: parser-fixture-v1
+      benchmark_name_pattern: "ParserFixture/ParseDouble_Nested_Lemire"
+      workloads: [ondemand-payload]
+
+    - id: parser-deep-search
+      name: Extreme_Deep_Search_SkipChild
+      description: Pencarian mendalam dengan skip child lalu baca string.
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: parser-fixture-v1
+      benchmark_name_pattern: "ParserFixture/Extreme_Deep_Search_SkipChild"
+      workloads: [ondemand-payload]
+
+    - id: parser-wide-first
+      name: FindField_First_InWideObject
+      description: Pencarian kunci pertama pada object 512 field.
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: parser-fixture-v1
+      benchmark_name_pattern: "WideObjectFixture/FindField_First_InWideObject"
+      workloads: [wide-object-payload]
+
+    - id: parser-wide-middle
+      name: FindField_Middle_InWideObject
+      description: Pencarian kunci tengah pada object 512 field.
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: parser-fixture-v1
+      benchmark_name_pattern: "WideObjectFixture/FindField_Middle_InWideObject"
+      workloads: [wide-object-payload]
+
+    - id: parser-wide-last
+      name: FindField_Last_InWideObject
+      description: Pencarian kunci terakhir pada object 512 field.
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: parser-fixture-v1
+      benchmark_name_pattern: "WideObjectFixture/FindField_Last_InWideObject"
+      workloads: [wide-object-payload]
+
+    - id: parser-string-plain
+      name: GetString_PlainPayload
+      description: Membaca string tanpa escape.
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: parser-fixture-v1
+      benchmark_name_pattern: "StringReadFixture/GetString_PlainPayload"
+      workloads: [string-payload]
+
+    - id: parser-string-escaped
+      name: GetString_EscapedPayload
+      description: Membaca string dengan escape.
+      comparison_role: other
+      lifecycle_status: approved
+      measurement_contract_id: parser-fixture-v1
+      benchmark_name_pattern: "StringReadFixture/GetString_EscapedPayload"
+      workloads: [string-payload]
+
+  workloads:
+    - id: ondemand-payload
+      name: Heterogeneous on-demand document
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        origin: benchmarks/parser_benchmark/main.cpp kJsonPayload
+        notes: >
+          Dokumen dengan int, nested object, double, dan string panjang. Dibangun
+          saat kompilasi; tidak ada berkas yang dihash.
+      benchmark_token: Ondemand
+
+    - id: wide-object-payload
+      name: Wide object, 512 fields
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        origin: benchmarks/parser_benchmark/main.cpp kWideFields
+        fields: 512
+      benchmark_token: WideObject
+
+    - id: string-payload
+      name: String read payload, plain and escaped
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        origin: benchmarks/parser_benchmark/main.cpp StringReadFixture
+      benchmark_token: StringRead
+
+  measurement_contracts:
+    - id: parser-fixture-v1
+      name: Parser fixture measurement
+      operation: Run the registered parser benchmark for the declared payload shape.
+      includes:
+        - work performed inside the registered benchmark loop
+      excludes:
+        - fixture SetUp and the initial validation scan
+        - any conclusion about datasets not measured here
+      notes: >
+        Audit main.cpp at the tested revision to confirm what the timed region
+        contains.
+
+  execution:
+    preset: native-release
+    mode: native
+    require_clean_worktree: true
+    executable_path: "{build_dir}/benchmarks/parser_benchmark"
+    configure_command:
+      - cmake
+      - -S
+      - "{source_dir}"
+      - -B
+      - "{build_dir}"
+      - -G
+      - Ninja
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_C_COMPILER=clang
+      - -DCMAKE_CXX_COMPILER=clang++
+      - -DCMAKE_CXX_STANDARD=23
+      - -DCMAKE_CXX_STANDARD_REQUIRED=ON
+      - -DCMAKE_CXX_EXTENSIONS=OFF
+      - -DCMAKE_CXX_FLAGS=-Wno-c2y-extensions
+      - -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - -DCMAKE_TOOLCHAIN_FILE={vcpkg_root}/scripts/buildsystems/vcpkg.cmake
+    build_command:
+      - cmake
+      - --build
+      - "{build_dir}"
+      - --target
+      - parser_benchmark
+    run_command:
+      - "{benchmark_executable}"
+      - "--benchmark_out={run_dir}/raw/parser_benchmark.json"
+      - --benchmark_out_format=json
+      - --benchmark_repetitions=1
+    env_passthrough:
+      - VCPKG_ROOT
+    expected_outputs:
+      - raw/parser_benchmark.json

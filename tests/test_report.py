@@ -377,6 +377,49 @@ def test_report_allows_a_javascript_only_experiment(tmp_path):
     assert report["js_parse"][0]["median_us_per_op"] == 1.1
 
 
+def test_report_run_filter_applies_to_javascript_rows(tmp_path):
+    """--run-ids must validate and filter JS rows too, not just nanosecond ones."""
+    database = tmp_path / "research.sqlite"
+    ingest_manifest(
+        _seed_run(
+            tmp_path,
+            benchmark_rows=[],
+            experiment_id="js-parse-saq",
+            run_id="seed-run-0004",
+        ),
+        database,
+    )
+    with connect(database) as connection:
+        execution_id = connection.execute(
+            "SELECT execution_id FROM executions WHERE run_id=?",
+            ("seed-run-0004",),
+        ).fetchone()[0]
+        connection.execute(
+            """INSERT INTO js_parse_results(
+                execution_id, source_artifact_id, run_id, payload_id, parser,
+                operation, median_us_per_op, time_unit, raw_row_json)
+               VALUES(?,?,?,?,?,?,?,?,?)""",
+            (execution_id, None, "seed-run-0004", "reports",
+             "JSON.parse", "parse_only", 2.4, "us", "{}"),
+        )
+        connection.commit()
+
+    report = build_report(
+        database_path=database,
+        experiment_id="js-parse-saq",
+        run_ids=["seed-run-0004"],
+    )
+    assert [row["payload_id"] for row in report["js_parse"]] == ["reports"]
+    assert report["run_ids"] == ["seed-run-0004"]
+
+    with pytest.raises(ReportError):
+        build_report(
+            database_path=database,
+            experiment_id="js-parse-saq",
+            run_ids=["absent-run"],
+        )
+
+
 def test_report_requires_ingested_rows(tmp_path):
     database = tmp_path / "research.sqlite"
     from ze_research.database import migrate

@@ -217,13 +217,18 @@ def build_report(
     )
     if run_ids:
         selected = set(run_ids)
-        missing = selected - {row["run_id"] for row in rows}
+        # A JavaScript-only experiment has no nanosecond rows to match against,
+        # so validate and filter each source independently.
+        missing = selected - {row["run_id"] for row in rows} - {
+            row["run_id"] for row in js_section
+        }
         if missing:
             raise ReportError(
                 "Run ID tidak ditemukan untuk eksperimen ini: "
                 + ", ".join(sorted(missing))
             )
         rows = [row for row in rows if row["run_id"] in selected]
+        js_section = [row for row in js_section if row["run_id"] in selected]
     protocol = _definition_protocol(database_path, experiment_id)
     summaries = _summarize(rows)
 
@@ -270,6 +275,9 @@ def build_report(
         )
 
     comparisons: list[dict[str, Any]] = []
+    observed_run_ids = sorted(
+        {row["run_id"] for row in observations} | {row["run_id"] for row in js_section}
+    )
     if pair:
         baseline_id, candidate_id = pair
         by_workload: dict[str, dict[str, list[dict[str, Any]]]] = {}
@@ -332,19 +340,20 @@ def build_report(
         "pair": {"baseline": pair[0], "candidate": pair[1]} if pair else None,
         "protocol": protocol.get("protocol", {}),
         "definition_sha256": protocol.get("definition_sha256"),
-        "run_ids": sorted({observation["run_id"] for observation in observations}),
+        "run_ids": observed_run_ids,
         # A changed definition is a new experiment version, so a report that
         # mixes them is describing two different questions.
         "definition_sha256_by_run": {
             run_id: next(
-                observation["definition_sha256"]
-                for observation in observations
-                if observation["run_id"] == run_id
+                row["definition_sha256"]
+                for row in [*observations, *js_section]
+                if row["run_id"] == run_id
             )
-            for run_id in sorted({observation["run_id"] for observation in observations})
+            for run_id in observed_run_ids
         },
         "definition_versions_in_report": len({
-            observation["definition_sha256"] for observation in observations
+            row["definition_sha256"]
+            for row in [*observations, *js_section]
         }),
         "aggregation": {
             "statistic": "median",

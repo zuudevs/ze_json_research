@@ -94,6 +94,32 @@ experiment. Rows that map to nothing stay UNMAPPED; the system never guesses.
 A workload with `dataset_path: null` may still declare a token, which is how
 an in-process generated payload is recorded without pretending a file exists.
 
+## Variant workload restriction
+
+A variant may declare which workloads it actually implements:
+
+~~~yaml
+variants:
+  - id: scanner8-library
+    benchmark_name_pattern: "BM_Scanner8_{dataset}"
+    workloads: [tiny, literal, github-events, update-center, jeopardy, synthetic-256k]
+  - id: scanner8-integrated-replica
+    benchmark_name_pattern: "BM_Scanner8_IntegratedReplica_{dataset}"
+    workloads: [github-events, jeopardy, replica-jeopardy-via-synth-slot]
+~~~
+
+Without it, every variant is crossed with every workload. Two real cases make
+that wrong rather than merely noisy:
+
+- the benchmark uses the **same `Synth` name slot for two different payloads**
+  (the in-process synthetic document, and `jeopardy.json` for the replicas), so
+  crossing both workloads with both variants produces identical patterns and
+  the result rows become AMBIGUOUS;
+- a replica variant that only registers three datasets otherwise gets specs for
+  all of them, describing measurements that never happen.
+
+Restriction is therefore honesty about the catalog, not an optimization.
+
 ## Correctness gates
 
 `correctness_gate` declares the evidence a performance run must already have:

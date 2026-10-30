@@ -26,12 +26,17 @@ Profiler-specific and coverage-specific importers, remote ingest, and signed man
 
 ## Benchmark and test integration
 
-Two experiments currently record real ze_json evidence:
+Six experiments now record real ze_json evidence, all with VERIFIED runs and
+`ingest --strict` passing without unmapped rows:
 
-| ID | Run of | Notes |
-|---|---|---|
-| `scanner-width-comparison` | `benchmarks/scanner_benchmark` | scanner8/scanner64 plus three frozen replicas; five real datasets plus synthetic payloads |
-| `correctness-gtest-suite` | the eight `tests/` executables | per-case JSON results; the gate source for the scanner experiment |
+| ID | Executable / mode | Registrations | Notes |
+|---|---|---|---|
+| `correctness-gtest-suite` | eight `tests/` targets, native | 51 test cases | the gate source for every performance experiment |
+| `scanner-width-comparison` | `benchmarks/scanner_benchmark`, native | 21 | scanner8/scanner64 plus three frozen replicas |
+| `parser-ondemand` | `benchmarks/parser_benchmark`, native | 9 | three fixtures; in-process payloads |
+| `session-api` | `benchmarks/session_benchmark`, native | 64 | parameter sweeps kept per-row, plus the GRAM Base/Tapewalk pair on real datasets |
+| `span-hybrid` | `benchmarks/span_iso_benchmark`, native | 48 | slope catalog plus the Hybrid/PreHybrid pair |
+| `js-parse-saq` | `benchmarks/json_baseline/run-baseline.js`, **script** | 6 payload lines | microsecond medians in their own table; snapshot is `synthetic_dummy` |
 
 Each declared workload dataset is hashed when the run starts and refused if the
 bytes no longer match the reviewed definition; the digests are stored with the
@@ -39,9 +44,9 @@ run, not recomputed later. A performance run additionally requires a VERIFIED
 correctness run on the same commit, so a speed claim can always name the test
 run that supports it.
 
-Parser, session, span_iso, and the JavaScript `JSON.parse` baseline do not have
-experiment definitions yet; `execution.mode: script` and `execution.steps`
-exist for that next round of work (see `docs/cli.md`).
+Because that gate compares the parent repository commit, the commit-ordering rule
+is: finish definitions and code first, run correctness, then run performance
+experiments, then commit documentation.
 
 ## Quick start (PowerShell)
 

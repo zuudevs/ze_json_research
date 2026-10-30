@@ -34,10 +34,10 @@ Not yet implemented:
 - Digital signature of manifests.
 - Full binary/build reproducibility or a sandbox for arbitrary declared commands.
 
-Partially integrated so far: the ze_json scanner benchmark and the Google Test
-suite are recorded through this repository. The parser, session, span_iso, and
-JSON.parse baseline harnesses do not have experiment definitions yet; their
-integration follows the same pattern (see `docs/registry.md`, "Execution steps",
+Integrated so far: the scanner, parser, session, and span_iso benchmarks, the
+JavaScript `JSON.parse` baseline, and the whole Google Test suite are recorded
+through this repository. Profiling-specific and coverage-specific importers are
+next; they follow the same pattern (see `docs/registry.md`, "Execution steps",
 and `docs/cli.md`).
 
 ## Test expectations

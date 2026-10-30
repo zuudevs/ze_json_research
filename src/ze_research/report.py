@@ -150,6 +150,55 @@ def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return summaries
 
 
+_JS_ROW_SQL = """
+SELECT j.payload_id, j.parser, j.operation, j.measurement_contract_id, j.root_type,
+       j.payload_sha256, j.payload_bytes_utf8, j.sample_manifest_sha256, j.snapshot_id,
+       j.min_us_per_op, j.median_us_per_op, j.mean_us_per_op,
+       j.standard_deviation_us_per_op, j.max_us_per_op,
+       j.coefficient_of_variation_percent, j.ops_per_second, j.bytes_per_second,
+       j.sample_count, j.iterations_per_sample, j.warmup_iterations, j.time_unit,
+       rr.run_id, rr.started_at, rr.verification_status, rr.manifest_sha256,
+       rr.definition_sha256, rr.gates_json, rr.build_json,
+       ri.sha256 AS input_sha256
+FROM js_parse_results AS j
+JOIN executions AS ex ON ex.execution_id = j.execution_id
+JOIN research_runs AS rr ON rr.run_id = ex.run_id
+JOIN experiment_versions AS ev ON ev.experiment_version_id = rr.experiment_version_id
+LEFT JOIN workload_cases AS wc ON wc.workload_id = j.payload_id
+LEFT JOIN run_inputs AS ri ON ri.run_id = rr.run_id AND ri.workload_id = wc.workload_id
+WHERE ev.experiment_id = ?
+ORDER BY rr.started_at, j.payload_id
+"""
+
+
+def _js_parse_section(database_path: Path, experiment_id: str) -> list[dict[str, Any]]:
+    if not database_path.is_file():
+        return []
+    connection = connect(database_path)
+    try:
+        try:
+            rows = connection.execute(_JS_ROW_SQL, (experiment_id,)).fetchall()
+        except sqlite3.Error:
+            return []
+    finally:
+        connection.close()
+
+    section: list[dict[str, Any]] = []
+    for row in rows:
+        record = dict(row)
+        build = json.loads(record.pop("build_json")) if record.get("build_json") else {}
+        section.append(
+            {
+                **record,
+                "interpreter": build.get("interpreter"),
+                "interpreter_version": build.get("interpreter_version"),
+                "dataset_sha256": record.get("input_sha256"),
+                "gates": json.loads(record.pop("gates_json")) if record.get("gates_json") else [],
+            }
+        )
+    return section
+
+
 def build_report(
     *,
     database_path: Path,
@@ -294,6 +343,9 @@ def build_report(
             "population": "run_type == 'iteration' rows, error rows excluded",
             "library": "python statistics.median",
         },
+        # JavaScript rows are never mixed with the nanosecond observations
+        # above: different unit, and the harness already aggregated them.
+        "js_parse": js_section,
         "unmapped_rows": [dict(zip(("run_id", "benchmark_name", "mapping_status"), row)) for row in unmapped],
         "observation_count": len(observations),
         "observations": observations,

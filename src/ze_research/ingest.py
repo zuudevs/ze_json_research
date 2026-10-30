@@ -35,12 +35,21 @@ def _duration_seconds(value: Any) -> float | None:
     return number / {"ns": 1e9, "us": 1e6, "µs": 1e6, "ms": 1e3, "s": 1}[unit]
 
 
-def _benchmark_spec_match(
-    benchmark_name: str, specs: list[sqlite3.Row]
-) -> tuple[str | None, str]:
+def _normalize_benchmark_name(benchmark_name: str) -> str:
     normalized = re.sub(
         r"/(?:min_time|min_warmup_time|repeats|iterations|threads):[^/]+", "", benchmark_name
     )
+    # Google Benchmark appends "/<arg>" for ->Args()/->Arg() registrations,
+    # for example BM_SpanIso_Scanner64_FillWS/8. Those suffixes are not part of
+    # the declared benchmark name, so strip a trailing argument group.
+    normalized = re.sub(r"/.+$", "", normalized)
+    return normalized
+
+
+def _benchmark_spec_match(
+    benchmark_name: str, specs: list[sqlite3.Row]
+) -> tuple[str | None, str]:
+    normalized = _normalize_benchmark_name(benchmark_name)
     matches: list[str] = []
     for spec in specs:
         pattern = re.escape(spec["name_pattern"])
@@ -240,18 +249,23 @@ def ingest_manifest(
         source = manifest.get("source", {})
         environment = manifest.get("environment", {})
         build = manifest.get("build", {})
+        recorded_inputs = {
+            entry.get("workload_id"): entry
+            for entry in manifest.get("inputs", [])
+            if isinstance(entry, dict) and entry.get("workload_id")
+        }
         connection.execute(
             """INSERT INTO research_runs(
                 run_id, experiment_version_id, started_at, finished_at, status,
                 verification_status, manifest_path, manifest_sha256, source_json,
-                environment_json, build_json, definition_sha256)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                environment_json, build_json, definition_sha256, gates_json)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 run_id, experiment_version_id, manifest.get("started_at", "unknown"),
                 manifest.get("finished_at"), manifest.get("status", "UNKNOWN"),
                 verification.get("verification_status", "NOT_CHECKED"),
                 str(manifest_path), manifest_hash, _json(source), _json(environment),
-                _json(build), actual_definition_hash,
+                _json(build), actual_definition_hash, _json(manifest.get("gates", [])),
             ),
         )
 
@@ -260,7 +274,15 @@ def ingest_manifest(
             input_path = workload.get("dataset_path")
             input_hash = workload.get("dataset_sha256")
             input_size = None
-            if input_path:
+            # Prefer the digest captured while the run executed. Recomputing it
+            # from the live checkout would let the working tree drift between
+            # the measurement and the import without anyone noticing.
+            recorded = recorded_inputs.get(workload_id)
+            if recorded is not None:
+                input_hash = recorded.get("sha256", input_hash)
+                input_size = recorded.get("size_bytes")
+                input_path = recorded.get("declared_path", input_path)
+            elif input_path:
                 candidate = Path(input_path)
                 if not candidate.is_absolute():
                     candidate = Path(source.get("repository_root", ".")) / candidate
@@ -277,7 +299,9 @@ def ingest_manifest(
 
         execution_id_by_purpose: dict[str, str] = {}
         execution_id_by_log: dict[str, str] = {}
-        for index, execution in enumerate(manifest.get("execution_records", []), start=1):
+        execution_id_by_output: dict[str, str] = {}
+        execution_records = manifest.get("execution_records", [])
+        for index, execution in enumerate(execution_records, start=1):
             execution_id = f"{run_id}-e{index:03d}"
             execution_id_by_purpose[execution.get("purpose", "unknown")] = execution_id
             connection.execute(
@@ -298,8 +322,16 @@ def ingest_manifest(
             for log_path in (execution.get("stdout_path"), execution.get("stderr_path")):
                 if log_path:
                     execution_id_by_log[log_path] = execution_id
+            for output_path in execution.get("produced_outputs", []) or []:
+                if isinstance(output_path, str):
+                    execution_id_by_output[output_path] = execution_id
 
+        # Multi-step runs have no single "run" purpose, so a result artifact is
+        # attached to the execution that produced it, then to a declared "run"
+        # step, and only as a last resort to the final execution.
         run_execution = execution_id_by_purpose.get("run")
+        if run_execution is None and execution_id_by_purpose:
+            run_execution = execution_id_by_purpose[execution_records[-1].get("purpose", "unknown")]
         for artifact in manifest.get("artifacts", []):
             if not isinstance(artifact, dict) or not isinstance(artifact.get("path"), str):
                 continue
@@ -307,7 +339,11 @@ def ingest_manifest(
             artifact_id = "artifact-" + hashlib.sha256(
                 f"{run_id}|{relative}".encode("utf-8")
             ).hexdigest()[:24]
-            execution_id = execution_id_by_log.get(relative, run_execution)
+            execution_id = (
+                execution_id_by_output.get(relative)
+                or execution_id_by_log.get(relative)
+                or run_execution
+            )
             connection.execute(
                 """INSERT INTO artifacts(
                     artifact_id, run_id, execution_id, relative_path, kind, sha256,

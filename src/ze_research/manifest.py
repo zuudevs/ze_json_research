@@ -217,15 +217,31 @@ def verify_manifest(manifest_path: Path) -> dict[str, Any]:
         errors.append("run_id dan experiment_id wajib tersedia.")
 
     build = manifest.get("build", {})
-    if isinstance(build, dict) and build.get("executable_path") and build.get("binary_sha256"):
-        executable = Path(build["executable_path"]).expanduser().resolve()
-        if not executable.is_file():
-            errors.append(f"Executable tidak ditemukan: {executable}")
-        else:
-            if sha256_file(executable) != build["binary_sha256"]:
-                errors.append("SHA-256 executable tidak cocok.")
-            if executable.stat().st_size != build.get("binary_size_bytes"):
-                errors.append("Ukuran executable tidak cocok.")
+    if isinstance(build, dict):
+        executables = build.get("executables")
+        if not isinstance(executables, list):
+            executables = []
+            if build.get("executable_path") and build.get("binary_sha256"):
+                executables = [
+                    {
+                        "path": build["executable_path"],
+                        "sha256": build["binary_sha256"],
+                        "size_bytes": build.get("binary_size_bytes"),
+                        "declared_template": build.get("executable_path"),
+                    }
+                ]
+        for record in executables:
+            if not isinstance(record, dict) or not record.get("path"):
+                errors.append("Entri executable pada build tidak valid.")
+                continue
+            executable = Path(record["path"]).expanduser().resolve()
+            if not executable.is_file():
+                errors.append(f"Executable tidak ditemukan: {executable}")
+                continue
+            if sha256_file(executable) != record.get("sha256"):
+                errors.append(f"SHA-256 executable tidak cocok: {executable.name}")
+            if executable.stat().st_size != record.get("size_bytes"):
+                errors.append(f"Ukuran executable tidak cocok: {executable.name}")
 
     return {
         "valid": not errors,

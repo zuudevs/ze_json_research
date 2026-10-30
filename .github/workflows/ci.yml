@@ -23,8 +23,31 @@ jobs:
         run: python -m pytest -q
       - name: Validate example registry
         run: ze-research validate
+      - name: List registered experiments
+        run: ze-research list-experiments
+      # The real registry stays in draft until a human reviews its references,
+      # so the formal-run gate is exercised against the generated smoke
+      # registry instead. Approval is a researcher's declaration, never a CI one.
       - name: Initialize isolated database
         run: |
           export ZE_JSON_RESEARCH_HOME="$RUNNER_TEMP/ze_json_research_data"
           ze-research init
           ze-research db-status
+      - name: End-to-end smoke of run, verify, ingest, and report
+        run: |
+          export ZE_JSON_RESEARCH_HOME="$RUNNER_TEMP/ze_json_research_smoke"
+          export ZE_JSON_SOURCE_DIR="$GITHUB_WORKSPACE"
+          REGISTRY="$RUNNER_TEMP/smoke-registry"
+          mkdir -p "$REGISTRY"
+          python scripts/research/make_smoke_experiment.py "$REGISTRY/smoke.yaml"
+          ze-research init
+          ze-research validate --registry-dir "$REGISTRY" --for-run
+          RUN_JSON=$(ze-research run --experiment smoke-script-benchmark --registry-dir "$REGISTRY")
+          echo "$RUN_JSON"
+          RUN_ID=$(python -c "import json,sys; print(json.loads(sys.argv[1])['run_id'])" "$RUN_JSON")
+          ze-research verify --run-id "$RUN_ID"
+          ze-research ingest --run-id "$RUN_ID" --strict
+          ze-research report --experiment smoke-script-benchmark \
+            --pair fake-baseline:fake-candidate --data-dir "$ZE_JSON_RESEARCH_HOME"
+          ze-research export --experiment smoke-script-benchmark
+          test "$(python -c "import json; print(len(json.load(open('$ZE_JSON_RESEARCH_HOME/reports/research-export.json'))['experiments']))" )" = "1"

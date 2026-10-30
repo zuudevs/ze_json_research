@@ -15,7 +15,9 @@ import yaml
 ALLOWED_STATUSES = {"draft", "reviewed", "approved_for_run", "retired"}
 ALLOWED_REFERENCE_REVIEWS = {"unreviewed", "reviewed", "rejected"}
 ALLOWED_ROLES = {"baseline", "candidate", "control", "replica", "other"}
+ALLOWED_EXECUTION_MODES = {"native", "script"}
 ID_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$")
+DATASET_PLACEHOLDER = "{dataset}"
 
 
 class RegistryError(ValueError):
@@ -194,6 +196,44 @@ def validate_experiment(
                     f"experiment.measurement_contracts[{index}].{field} harus berupa array string."
                 )
 
+    # Workload-level benchmark token: turns a templated variant name pattern
+    # into an exact benchmark name so one imported row maps to exactly one spec.
+    workload_tokens: set[str] = set()
+    for index, workload in enumerate(workloads if isinstance(workloads, list) else []):
+        if not isinstance(workload, dict):
+            continue
+        token = workload.get("benchmark_token")
+        if token is None:
+            continue
+        if not _nonempty(token):
+            errors.append(
+                f"experiment.workloads[{index}].benchmark_token wajib berupa string nonkosong."
+            )
+            continue
+        workload_tokens.add(workload["id"])
+
+    variant_list = variants if isinstance(variants, list) else []
+    workload_list = workloads if isinstance(workloads, list) else []
+    for variant in variant_list:
+        if not isinstance(variant, dict):
+            continue
+        pattern = variant.get("benchmark_name_pattern")
+        if not _nonempty(pattern):
+            continue
+        if DATASET_PLACEHOLDER in pattern:
+            for workload in workload_list:
+                if not isinstance(workload, dict) or workload.get("id") not in workload_tokens:
+                    errors.append(
+                        f"Varian {variant.get('id')!r} memakai pola {DATASET_PLACEHOLDER}; "
+                        f"workload {workload.get('id')!r} wajib memiliki benchmark_token "
+                        "agar pemetaan hasil ke varian bersifat satu-ke-satu."
+                    )
+        elif len(workload_list) > 1:
+            errors.append(
+                f"Varian {variant.get('id')!r} memakai pola literal tanpa {DATASET_PLACEHOLDER} "
+                f"padahal eksperimen memiliki {len(workload_list)} workload; hasil pemetaan akan ambigu."
+            )
+
     metrics = experiment.get("metrics")
     primary = metrics.get("primary") if isinstance(metrics, dict) else None
     if not isinstance(primary, dict):
@@ -219,15 +259,98 @@ def validate_experiment(
     if not isinstance(execution, dict):
         errors.append("experiment.execution wajib berupa object/map.")
     else:
-        for field in ("configure_command", "build_command", "run_command"):
-            command = execution.get(field)
-            if not isinstance(command, list) or not command or not all(
-                isinstance(arg, str) and arg for arg in command
-            ):
-                errors.append(f"experiment.execution.{field} wajib berupa array argumen string nonkosong.")
+        mode = execution.get("mode", "native")
+        if mode not in ALLOWED_EXECUTION_MODES:
+            errors.append(
+                "experiment.execution.mode harus salah satu dari: "
+                + ", ".join(sorted(ALLOWED_EXECUTION_MODES))
+            )
+        elif mode == "script":
+            for field in ("configure_command", "build_command"):
+                if field in execution:
+                    errors.append(
+                        f"experiment.execution.{field} tidak digunakan pada mode 'script'."
+                    )
+            if "executable_path" in execution and execution.get("executable_path"):
+                errors.append(
+                    "experiment.execution.executable_path tidak digunakan pada mode 'script'."
+                )
+
+        steps = execution.get("steps")
+        legacy_commands = {}
+        if steps is not None:
+            if not isinstance(steps, list) or not steps:
+                errors.append("experiment.execution.steps wajib berupa array nonkosong.")
+            else:
+                seen_step_ids: set[str] = set()
+                for index, step in enumerate(steps):
+                    label = f"experiment.execution.steps[{index}]"
+                    if not isinstance(step, dict):
+                        errors.append(f"{label} harus berupa object/map.")
+                        continue
+                    step_id = step.get("id") or step.get("purpose") or f"step{index + 1}"
+                    if not _nonempty(step_id):
+                        errors.append(f"{label}.id wajib berupa string nonkosong.")
+                    elif step_id in seen_step_ids:
+                        errors.append(f"experiment.execution.steps memiliki id duplikat: {step_id!r}.")
+                    else:
+                        seen_step_ids.add(step_id)
+                    command = step.get("command")
+                    if not isinstance(command, list) or not command or not all(
+                        isinstance(arg, str) and arg for arg in command
+                    ):
+                        errors.append(f"{label}.command wajib berupa array argumen string nonkosong.")
+                    cwd = step.get("cwd", "source_dir")
+                    if cwd not in {"source_dir", "run_dir"}:
+                        errors.append(f"{label}.cwd harus 'source_dir' atau 'run_dir'.")
+        else:
+            for field in ("configure_command", "build_command", "run_command"):
+                legacy_commands[field] = execution.get(field)
+            if mode == "native":
+                for field, command in legacy_commands.items():
+                    if not isinstance(command, list) or not command or not all(
+                        isinstance(arg, str) and arg for arg in command
+                    ):
+                        errors.append(
+                            f"experiment.execution.{field} wajib berupa array argumen string nonkosong "
+                            "saat execution.steps tidak digunakan."
+                        )
+            elif "run_command" not in execution:
+                errors.append("experiment.execution.run_command wajib ada pada mode 'script'.")
+
+        passthrough = execution.get("env_passthrough", [])
+        if not isinstance(passthrough, list) or not all(_nonempty(name) for name in passthrough):
+            errors.append("experiment.execution.env_passthrough harus berupa array string.")
+
+        multi = execution.get("executable_paths")
+        if multi is not None and (
+            not isinstance(multi, list)
+            or not multi
+            or not all(_nonempty(template) for template in multi)
+        ):
+            errors.append(
+                "experiment.execution.executable_paths wajib berupa array template path nonkosong."
+            )
+        single = execution.get("executable_path")
+        if single is not None and not _nonempty(single):
+            errors.append("experiment.execution.executable_path wajib berupa string nonkosong.")
+
         outputs = execution.get("expected_outputs")
         if not isinstance(outputs, list) or not outputs or not all(_nonempty(p) for p in outputs):
             errors.append("experiment.execution.expected_outputs wajib berupa array path nonkosong.")
+
+    gate = experiment.get("correctness_gate")
+    if gate not in (None, False):
+        if not isinstance(gate, dict):
+            errors.append("experiment.correctness_gate harus berupa object/map.")
+        else:
+            if not _nonempty(gate.get("experiment_id")):
+                errors.append("experiment.correctness_gate.experiment_id wajib berupa string nonkosong.")
+            required_status = gate.get("require_verification_status", "VERIFIED")
+            if not _nonempty(required_status):
+                errors.append(
+                    "experiment.correctness_gate.require_verification_status wajib berupa string nonkosong."
+                )
 
     if for_run:
         if status != "approved_for_run":
@@ -249,7 +372,9 @@ def validate_experiment(
 def load_experiments(registry_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
     if not registry_dir.is_dir():
         raise RegistryError(f"Direktori registry tidak ditemukan: {registry_dir}")
-    paths = sorted({*registry_dir.glob("*.yaml"), *registry_dir.glob("*.yml")})
+    # Recursive: experiments may be grouped into subdirectories by domain
+    # (for example experiments/benchmark/ and experiments/correctness/).
+    paths = sorted({*registry_dir.rglob("*.yaml"), *registry_dir.rglob("*.yml")})
     return [(path, load_yaml(path)) for path in paths]
 
 

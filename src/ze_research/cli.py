@@ -23,6 +23,12 @@ from .paths import (
     validate_external_data_dir,
 )
 from .registry import RegistryError, definition_sha256, find_experiment, load_yaml, validate_registry
+from .report import (
+    ReportError,
+    build_report,
+    export_payload,
+    record_analysis,
+)
 from .runner import RunnerError, run_experiment
 
 
@@ -82,7 +88,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 def _cmd_list_experiments(args: argparse.Namespace) -> int:
     directory = _registry_dir(args.registry_dir)
     result = []
-    for path in sorted([*directory.glob("*.yaml"), *directory.glob("*.yml")]):
+    for path in sorted([*directory.rglob("*.yaml"), *directory.rglob("*.yml")]):
         try:
             document = load_yaml(path)
             experiment = document["experiment"]
@@ -147,6 +153,29 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
     validate_external_data_dir(database_path.parent, source_dir=source_dir)
     result = ingest_manifest(manifest_path, database_path, verify=not args.skip_verify)
     _print_json(result)
+    if args.strict and result.get("status") == "IMPORTED":
+        with connect(database_path) as connection:
+            unmapped = [
+                dict(row)
+                for row in connection.execute(
+                    """SELECT ex.run_id, br.benchmark_name_raw, br.mapping_status
+                       FROM benchmark_results AS br
+                       JOIN executions AS ex ON ex.execution_id = br.execution_id
+                       WHERE ex.run_id = ? AND br.mapping_status <> 'MAPPED'""",
+                    (result["run_id"],),
+                )
+            ]
+        if unmapped:
+            print(
+                "STRICT INGEST GAGAL: ada baris hasil yang tidak terpetakan ke satu varian.",
+                file=sys.stderr,
+            )
+            for row in unmapped:
+                print(
+                    f"- {row['run_id']}: {row['benchmark_name_raw']} ({row['mapping_status']})",
+                    file=sys.stderr,
+                )
+            return 2
     return 0
 
 
@@ -178,6 +207,85 @@ def _cmd_list_runs(args: argparse.Namespace) -> int:
                FROM research_runs ORDER BY started_at DESC"""
         ).fetchall()
     _print_json([dict(row) for row in rows])
+    return 0
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    source_dir = resolve_source_dir(None) if os.environ.get("ZE_JSON_SOURCE_DIR") else None
+    validate_external_data_dir(data_dir, source_dir=source_dir)
+    database_path = (
+        Path(args.database).expanduser().resolve()
+        if args.database else data_dir / "database" / "ze_json_research.sqlite"
+    )
+    validate_external_data_dir(database_path.parent, source_dir=source_dir)
+
+    pair: tuple[str, str] | None = None
+    if args.pair:
+        parts = [part.strip() for part in args.pair.split(":", 1)]
+        if len(parts) != 2 or not all(parts):
+            print("ERROR: --pair harus berformat baseline:candidate.", file=sys.stderr)
+            return 2
+        pair = (parts[0], parts[1])
+
+    report = build_report(
+        database_path=database_path, experiment_id=args.experiment, pair=pair
+    )
+    destination = (
+        Path(args.output).expanduser().resolve()
+        if args.output else data_dir / "reports" / f"{args.experiment}-report.json"
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    record_analysis(database_path=database_path, report=report, output_path=destination)
+    _print_json({
+        "experiment_id": args.experiment,
+        "pair": report["pair"],
+        "observation_count": report["observation_count"],
+        "comparison_count": len(report["comparisons"]),
+        "unmapped_row_count": len(report["unmapped_rows"]),
+        "unverifiable_comparisons": [
+            comparison["workload_id"]
+            for comparison in report["comparisons"]
+            if comparison["status"] != "COMPARED"
+        ],
+        "output": str(destination),
+    })
+    if report["unmapped_rows"] or any(
+        comparison["status"] != "COMPARED" for comparison in report["comparisons"]
+    ):
+        print(
+            "Laporan dihasilkan, tetapi datanya belum dapat dipertanggungjawabkan "
+            "sepenuhnya: ada baris tak terpetakan atau pasangan tak lengkap.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+def _cmd_export(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    source_dir = resolve_source_dir(None) if os.environ.get("ZE_JSON_SOURCE_DIR") else None
+    validate_external_data_dir(data_dir, source_dir=source_dir)
+    database_path = (
+        Path(args.database).expanduser().resolve()
+        if args.database else data_dir / "database" / "ze_json_research.sqlite"
+    )
+    validate_external_data_dir(database_path.parent, source_dir=source_dir)
+    payload = export_payload(database_path=database_path, experiment_id=args.experiment)
+    destination = (
+        Path(args.output).expanduser().resolve()
+        if args.output else data_dir / "reports" / "research-export.json"
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    _print_json({"output": str(destination), "experiment_count": payload["experiment_count"]})
     return 0
 
 
@@ -226,6 +334,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-verify", action="store_true",
         help="Skip artifact verification for controlled recovery/debugging only",
     )
+    ingest_parser.add_argument(
+        "--strict", action="store_true",
+        help="Fail the import when benchmark rows cannot be mapped to exactly one variant",
+    )
     ingest_parser.set_defaults(handler=_cmd_ingest)
 
     status_parser = subparsers.add_parser("db-status", help="Show SQLite integrity, migrations, and counts")
@@ -235,6 +347,27 @@ def build_parser() -> argparse.ArgumentParser:
     runs_parser = subparsers.add_parser("list-runs", help="List imported research runs")
     runs_parser.add_argument("--data-dir", help="External data directory")
     runs_parser.set_defaults(handler=_cmd_list_runs)
+
+    report_parser = subparsers.add_parser(
+        "report", help="Build a traceable comparison from ingested runs"
+    )
+    report_parser.add_argument("--experiment", required=True, help="Experiment ID to report on")
+    report_parser.add_argument(
+        "--pair", help="Comparison pair as baseline:candidate variant IDs"
+    )
+    report_parser.add_argument("--data-dir", help="External data directory")
+    report_parser.add_argument("--database", help="Optional explicit SQLite path")
+    report_parser.add_argument("--output", help="Report output path")
+    report_parser.set_defaults(handler=_cmd_report)
+
+    export_parser = subparsers.add_parser(
+        "export", help="Export ingested runs with provenance for analysis notebooks"
+    )
+    export_parser.add_argument("--experiment", help="Limit the export to one experiment ID")
+    export_parser.add_argument("--data-dir", help="External data directory")
+    export_parser.add_argument("--database", help="Optional explicit SQLite path")
+    export_parser.add_argument("--output", help="Export output path")
+    export_parser.set_defaults(handler=_cmd_export)
     return parser
 
 

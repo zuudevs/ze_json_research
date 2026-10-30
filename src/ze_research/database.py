@@ -197,6 +197,14 @@ def persist_definition(connection: sqlite3.Connection, document: dict[str, Any])
     comparison_group = experiment.get("comparison", {}).get("group")
     for variant in experiment.get("variants", []):
         for workload in experiment.get("workloads", []):
+            # Substitute the workload's benchmark token into the variant pattern
+            # so that the stored pattern is an exact benchmark name. A wildcard
+            # pattern would let one imported row match several specs, which is
+            # how a synthetic case gets mislabelled as a real dataset.
+            name_pattern = variant["benchmark_name_pattern"]
+            token = workload.get("benchmark_token")
+            if isinstance(token, str) and token and "{dataset}" in name_pattern:
+                name_pattern = name_pattern.replace("{dataset}", token)
             spec_id = "spec-" + hashlib.sha256(
                 f"{version_id}|{variant['id']}|{workload['id']}|{variant['measurement_contract_id']}".encode("utf-8")
             ).hexdigest()[:24]
@@ -207,7 +215,7 @@ def persist_definition(connection: sqlite3.Connection, document: dict[str, Any])
                    VALUES(?,?,?,?,?,?,?,?)""",
                 (
                     spec_id, version_id, variant["id"], workload["id"],
-                    variant["measurement_contract_id"], variant["benchmark_name_pattern"],
+                    variant["measurement_contract_id"], name_pattern,
                     variant["comparison_role"], comparison_group,
                 ),
             )

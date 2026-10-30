@@ -1,9 +1,9 @@
-schema_version: 1
+﻿schema_version: 1
 
 experiment:
   id: js-parse-saq
   title: JavaScript JSON.parse baseline on the SAQ Report payload snapshot
-  status: draft
+  status: approved_for_run
   categories:
     - performance
     - javascript-baseline
@@ -15,7 +15,7 @@ experiment:
 
   motivation: >
     Baseline JS sebelumnya dijalankan tanpa manifest run. Tanpa pencatatan versi
-    Node, konfigurasi iterasi, dan digest payload, angka µs/op tidak bisa
+    Node, konfigurasi iterasi, dan digest payload, angka Âµs/op tidak bisa
     dipertanggungjawabkan atau dibandingkan dengan pengukuran lain.
 
   research_question: >

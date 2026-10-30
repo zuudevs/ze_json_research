@@ -1,9 +1,9 @@
-schema_version: 1
+﻿schema_version: 1
 
 experiment:
   id: parser-ondemand
   title: On-demand parser cost per payload shape
-  status: draft
+  status: approved_for_run
   categories:
     - performance
     - json-parsing

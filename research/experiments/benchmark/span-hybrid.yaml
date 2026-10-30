@@ -1,9 +1,9 @@
-schema_version: 1
+﻿schema_version: 1
 
 experiment:
   id: span-hybrid
   title: Span scanning slope and the hybrid-versus-prehybrid pair on real datasets
-  status: draft
+  status: approved_for_run
   categories:
     - performance
     - json-scanning
@@ -16,7 +16,7 @@ experiment:
 
   motivation: >
     Pasangan terdaftar bersebelahan adalah cara wajar mengatasi getaran jam
-    antar-proses yang terdokumentasi 15–45%. Tanpa pencatatan per dataset,
+    antar-proses yang terdokumentasi 15â€“45%. Tanpa pencatatan per dataset,
     klaim perbaikan span tidak bisa dibedakan dari klaim akibat padding.
 
   research_question: >

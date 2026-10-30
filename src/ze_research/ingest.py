@@ -119,27 +119,36 @@ def _test_status(case: dict[str, Any]) -> tuple[str, str | None]:
     name = str(case.get("name", "")).upper()
     if "DISABLED" in result or "DISABLED" in status or "DISABLED" in name:
         return "DISABLED", None
-    if "SKIPPED" in result or "SKIPPED" in status:
+    if "SKIPPED" in result or "SKIPPED" in status or "NOTRUN" in status:
         return "SKIPPED", None
-    if result == "COMPLETED" and status in {"RUN", "OK", ""}:
+    # Google Test JSON marks a case that executed as status "RUN"; success is
+    # the empty failures list handled above. Older formats use result/status.
+    if status == "RUN" or result in {"COMPLETED", "PASSED", "SUCCESS"}:
         return "PASSED", None
-    if result in {"PASSED", "SUCCESS"} or status in {"PASSED", "SUCCESS"}:
+    if status in {"PASSED", "SUCCESS"}:
         return "PASSED", None
     return "UNKNOWN", None
 
 
 def _walk_gtest_cases(payload: dict[str, Any]) -> list[tuple[str | None, dict[str, Any]]]:
+    """Collect (suite, case) pairs from any Google Test JSON layout.
+
+    Modern layout is ``testsuites[].testsuite[]``; older ones used
+    ``testsuites[].tests[]`` or nested ``testsuites``. ``tests`` is a count in
+    the modern format, not a list, so it must never be treated as cases.
+    """
     records: list[tuple[str | None, dict[str, Any]]] = []
 
     def visit(suite: Any, inherited_name: str | None = None) -> None:
         if not isinstance(suite, dict):
             return
         suite_name = suite.get("name") if isinstance(suite.get("name"), str) else inherited_name
-        cases = suite.get("tests")
-        if isinstance(cases, list):
-            for case in cases:
-                if isinstance(case, dict) and isinstance(case.get("name"), str):
-                    records.append((suite_name, case))
+        for key in ("testsuite", "tests"):
+            cases = suite.get(key)
+            if isinstance(cases, list):
+                for case in cases:
+                    if isinstance(case, dict) and isinstance(case.get("name"), str):
+                        records.append((suite_name, case))
         nested = suite.get("testsuites")
         if isinstance(nested, list):
             for item in nested:
@@ -302,7 +311,12 @@ def ingest_manifest(
         execution_id_by_output: dict[str, str] = {}
         execution_records = manifest.get("execution_records", [])
         for index, execution in enumerate(execution_records, start=1):
-            execution_id = f"{run_id}-e{index:03d}"
+            sequence = execution.get("sequence_number", index)
+            if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
+                sequence = index
+            # The ID follows the recorded sequence number so a result row can be
+            # traced back to the step number seen in the manifest.
+            execution_id = f"{run_id}-e{sequence:03d}"
             execution_id_by_purpose[execution.get("purpose", "unknown")] = execution_id
             connection.execute(
                 """INSERT INTO executions(
@@ -311,7 +325,7 @@ def ingest_manifest(
                     stderr_artifact_path)
                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    execution_id, run_id, execution.get("sequence_number", index),
+                    execution_id, run_id, sequence,
                     execution.get("purpose", "unknown"), _json(execution.get("command", [])),
                     execution.get("cwd", str(run_dir)), execution.get("started_at", manifest.get("started_at", "unknown")),
                     execution.get("finished_at"), execution.get("status", "UNKNOWN"),

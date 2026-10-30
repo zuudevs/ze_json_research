@@ -228,9 +228,23 @@ def _cmd_report(args: argparse.Namespace) -> int:
             return 2
         pair = (parts[0], parts[1])
 
-    report = build_report(
-        database_path=database_path, experiment_id=args.experiment, pair=pair
-    )
+    run_ids: list[str] | None = None
+    if args.run_ids:
+        run_ids = [part.strip() for part in args.run_ids.split(",") if part.strip()]
+        if not run_ids:
+            print("ERROR: --run-ids tidak boleh kosong.", file=sys.stderr)
+            return 2
+
+    try:
+        report = build_report(
+            database_path=database_path,
+            experiment_id=args.experiment,
+            pair=pair,
+            run_ids=run_ids,
+        )
+    except ReportError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
     destination = (
         Path(args.output).expanduser().resolve()
         if args.output else data_dir / "reports" / f"{args.experiment}-report.json"
@@ -354,6 +368,10 @@ def build_parser() -> argparse.ArgumentParser:
     report_parser.add_argument("--experiment", required=True, help="Experiment ID to report on")
     report_parser.add_argument(
         "--pair", help="Comparison pair as baseline:candidate variant IDs"
+    )
+    report_parser.add_argument(
+        "--run-ids",
+        help="Comma-separated run IDs to restrict the report to; defaults to every run",
     )
     report_parser.add_argument("--data-dir", help="External data directory")
     report_parser.add_argument("--database", help="Optional explicit SQLite path")

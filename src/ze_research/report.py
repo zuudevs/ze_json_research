@@ -149,8 +149,18 @@ def build_report(
     database_path: Path,
     experiment_id: str,
     pair: tuple[str, str] | None = None,
+    run_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     rows = _load_rows(database_path, experiment_id)
+    if run_ids:
+        selected = set(run_ids)
+        missing = selected - {row["run_id"] for row in rows}
+        if missing:
+            raise ReportError(
+                "Run ID tidak ditemukan untuk eksperimen ini: "
+                + ", ".join(sorted(missing))
+            )
+        rows = [row for row in rows if row["run_id"] in selected]
     protocol = _definition_protocol(database_path, experiment_id)
     summaries = _summarize(rows)
 
@@ -256,6 +266,20 @@ def build_report(
         "pair": {"baseline": pair[0], "candidate": pair[1]} if pair else None,
         "protocol": protocol.get("protocol", {}),
         "definition_sha256": protocol.get("definition_sha256"),
+        "run_ids": sorted({observation["run_id"] for observation in observations}),
+        # A changed definition is a new experiment version, so a report that
+        # mixes them is describing two different questions.
+        "definition_sha256_by_run": {
+            run_id: next(
+                observation["definition_sha256"]
+                for observation in observations
+                if observation["run_id"] == run_id
+            )
+            for run_id in sorted({observation["run_id"] for observation in observations})
+        },
+        "definition_versions_in_report": len({
+            observation["definition_sha256"] for observation in observations
+        }),
         "aggregation": {
             "statistic": "median",
             "population": "run_type == 'iteration' rows, error rows excluded",
@@ -280,7 +304,9 @@ def record_analysis(
         "pair": report["pair"],
         "report_version": report["report_version"],
         "aggregation": report["aggregation"],
-        "run_ids": sorted({row["run_id"] for row in report["observations"]}),
+        "run_ids": report.get("run_ids")
+        or sorted({row["run_id"] for row in report["observations"]}),
+        "definition_sha256_by_run": report.get("definition_sha256_by_run", {}),
     }
     analysis_run_id = "analysis-" + hashlib.sha256(
         _json(configuration).encode("utf-8")
@@ -341,7 +367,7 @@ def record_analysis(
                     ),
                 ),
             )
-        for run_id in configuration["run_ids"]:
+        for run_id in configuration["run_ids"] or []:
             connection.execute(
                 "INSERT OR IGNORE INTO analysis_inputs(analysis_run_id, run_id) VALUES(?,?)",
                 (analysis_run_id, run_id),

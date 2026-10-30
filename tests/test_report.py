@@ -266,6 +266,48 @@ def test_record_analysis_is_idempotent(tmp_path):
     assert rows == 1
 
 
+def test_report_can_be_restricted_to_specific_runs(tmp_path):
+    database = tmp_path / "research.sqlite"
+    manifest_path = _seed_run(
+        tmp_path,
+        benchmark_rows=_rows("BM_Scanner8_GithubEvents", [20.0])
+        + _rows("BM_Scanner64_GithubEvents", [10.0]),
+    )
+    ingest_manifest(manifest_path, database)
+
+    full = build_report(database_path=database, experiment_id="scanner-width-comparison")
+    assert full["run_ids"] == ["seed-run-0001"]
+
+    report = build_report(
+        database_path=database,
+        experiment_id="scanner-width-comparison",
+        pair=("scanner8-library", "scanner64-library"),
+        run_ids=["seed-run-0001"],
+    )
+    assert report["run_ids"] == ["seed-run-0001"]
+    assert report["definition_versions_in_report"] == 1
+    assert [item["status"] for item in report["comparisons"]] == ["COMPARED"]
+
+    with pytest.raises(ReportError):
+        build_report(
+            database_path=database,
+            experiment_id="scanner-width-comparison",
+            run_ids=["no-such-run"],
+        )
+
+
+def test_report_flags_mixed_definition_versions(tmp_path):
+    database = tmp_path / "research.sqlite"
+    manifest_path = _seed_run(
+        tmp_path,
+        benchmark_rows=_rows("BM_Scanner8_GithubEvents", [20.0]),
+    )
+    ingest_manifest(manifest_path, database)
+    report = build_report(database_path=database, experiment_id="scanner-width-comparison")
+    assert report["definition_sha256_by_run"]["seed-run-0001"]
+    assert report["definition_versions_in_report"] == 1
+
+
 def test_report_requires_ingested_rows(tmp_path):
     database = tmp_path / "research.sqlite"
     from ze_research.database import migrate

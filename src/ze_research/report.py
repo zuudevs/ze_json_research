@@ -58,7 +58,9 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def _load_rows(database_path: Path, experiment_id: str) -> list[dict[str, Any]]:
+def _load_rows(
+    database_path: Path, experiment_id: str, *, allow_empty: bool = False
+) -> list[dict[str, Any]]:
     if not database_path.is_file():
         raise ReportError(f"Database tidak ditemukan: {database_path}")
     migrate(database_path)
@@ -69,7 +71,8 @@ def _load_rows(database_path: Path, experiment_id: str) -> list[dict[str, Any]]:
         raise ReportError(f"Gagal membaca hasil benchmark: {exc}") from exc
     finally:
         connection.close()
-    if not rows:
+    if not rows and not allow_empty:
+        # A JavaScript-only experiment legitimately has no benchmark rows.
         raise ReportError(
             f"Tidak ada benchmark_results untuk eksperimen {experiment_id!r}. "
             "Ingest run-nya lebih dahulu."
@@ -206,7 +209,12 @@ def build_report(
     pair: tuple[str, str] | None = None,
     run_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    rows = _load_rows(database_path, experiment_id)
+    js_section = _js_parse_section(database_path, experiment_id)
+    # A JavaScript-only experiment has no nanosecond rows; that is legitimate.
+    # An experiment with neither kind of result is a real error.
+    rows = _load_rows(
+        database_path, experiment_id, allow_empty=bool(js_section)
+    )
     if run_ids:
         selected = set(run_ids)
         missing = selected - {row["run_id"] for row in rows}

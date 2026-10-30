@@ -340,6 +340,43 @@ def test_report_flags_mixed_definition_versions(tmp_path):
     assert report["definition_versions_in_report"] == 1
 
 
+def test_report_allows_a_javascript_only_experiment(tmp_path):
+    """A JS experiment has no nanosecond rows and must still report."""
+    database = tmp_path / "research.sqlite"
+    ingest_manifest(
+        _seed_run(
+            tmp_path,
+            benchmark_rows=[],
+            experiment_id="js-parse-saq",
+            run_id="seed-run-0003",
+        ),
+        database,
+    )
+    with connect(database) as connection:
+        execution_id = connection.execute(
+            "SELECT execution_id FROM executions WHERE run_id=?",
+            ("seed-run-0003",),
+        ).fetchone()[0]
+        connection.execute(
+            """INSERT INTO js_parse_results(
+                execution_id, source_artifact_id, run_id, payload_id, parser,
+                operation, median_us_per_op, time_unit, raw_row_json)
+               VALUES(?,?,?,?,?,?,?,?,?)""",
+            (
+                execution_id, None, "seed-run-0003", "assistants",
+                "JSON.parse", "parse_only", 1.1, "us", "{}",
+            ),
+        )
+        connection.commit()
+
+    report = build_report(
+        database_path=database, experiment_id="js-parse-saq"
+    )
+    assert report["observations"] == []
+    assert [row["payload_id"] for row in report["js_parse"]] == ["assistants"]
+    assert report["js_parse"][0]["median_us_per_op"] == 1.1
+
+
 def test_report_requires_ingested_rows(tmp_path):
     database = tmp_path / "research.sqlite"
     from ze_research.database import migrate

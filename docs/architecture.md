@@ -47,17 +47,33 @@ There is no server or network transfer in the current MVP. The runner invokes co
 
 - Registry: loads YAML, validates IDs/references, checks the research basis, and computes a canonical SHA-256 fingerprint.
 - Paths: resolves configuration and rejects data/build paths inside either repository.
-- Runner: captures source state, runs configure/build/run commands, records exit codes and logs, and generates a manifest.
-- Manifest verifier: validates contained relative paths, expected outputs, definition fingerprint, artifact hashes/sizes, and executable hash if recorded.
-- Database: applies immutable, versioned SQL migrations and stores definitions, versions, references, basis items, variants, workloads, contracts, runs, executions, artifacts, and typed results.
-- Importer: verifies completed runs before import; imports Google Benchmark result rows and basic Google Test test cases.
-- CLI: exposes initialization, validation, run, verify, ingest, database status, and listing commands.
+- Runner: captures source state, runs the declared execution steps, hashes declared workload inputs before executing, evaluates correctness gates, records exit codes, logs, per-step produced outputs, and generates a manifest.
+- Manifest verifier: validates contained relative paths, expected outputs, definition fingerprint, artifact hashes/sizes, and the hash of every recorded executable.
+- Gates: fail-closed correctness evidence that must exist before a performance run may start.
+- Database: applies immutable, versioned SQL migrations and stores definitions, versions, references, basis items, variants, workloads, contracts, runs, executions, artifacts, gates, and typed results.
+- Importer: verifies completed runs before import; imports Google Benchmark result rows and basic Google Test test cases, attributing each to the execution that produced the file and preferring the digests recorded at run time.
+- Report: builds median pair comparisons with unit and pair-completeness checks, keeps unmapped rows visible, and records analysis runs plus derived results with full provenance.
+- CLI: exposes initialization, validation, run, verify, ingest, report, export, database status, and listing commands.
 
 ## Run, execution, and result are different entities
 
 A research run is a single attempt governed by one versioned experiment definition. The run may contain configure, build, and run executions. A single execution can produce several artifacts and result rows.
 
 A shared run ID does not imply that two benchmark variants were interleaved in the same process. Claims requiring an interleaved comparison must be supported by execution records and by a harness that really runs both variants in one process.
+
+## Run, gate, and evidence are different entities
+
+A run may depend on another run. A performance experiment declares
+`correctness_gate` naming a correctness experiment; before it executes the
+runner requires a COMPLETED, VERIFIED run of that experiment on the same git
+commit and records which run satisfied the gate. The performance numbers and
+the correctness evidence therefore share a commit rather than a memory.
+
+## Inputs belong to the run
+
+Declared workload digests are captured when the run executes, into
+`metadata/inputs.json` and `manifest.inputs`, and are what ingestion stores.
+The database never re-hashes the live checkout for a past run.
 
 ## Data model summary
 

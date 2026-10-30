@@ -83,7 +83,63 @@ db-status checks SQLite integrity, foreign keys, applied migrations, and record 
 ## Exit codes
 
 - 0: command completed successfully.
-- 1: registry validation failed.
+- 1: registry validation failed; for `report`, the data is present but not
+  defensible (unmapped result rows or an incomplete/incompatible comparison).
 - 2: runtime, provenance, database, verification, or execution failure.
 
-Run a command with --help to inspect its current options.
+## run: multi-step and script executions
+
+`execution.steps` replaces the fixed configure/build/run trio when a run needs
+more (or fewer) commands, for example one step per test executable:
+
+~~~yaml
+execution:
+  mode: native        # or script
+  steps:
+    - id: configure
+      command: [cmake, -S, "{source_dir}", -B, "{build_dir}", -G, Ninja]
+    - id: build-tests
+      command: [cmake, --build, "{build_dir}", "--target", "scanner_test"]
+    - id: test-scanner
+      command:
+        - "{build_dir}/tests/scanner_test"
+        - "--gtest_output=json:{run_dir}/raw/tests/scanner_test.json"
+~~~
+
+Each step may set `cwd: source_dir|run_dir` and `required: false`. The runner
+records which step produced which expected output, so a result row is attributed
+to the execution that actually created it. The legacy `configure_command`,
+`build_command`, and `run_command` arrays remain supported.
+
+Supported placeholders: `source_dir`, `build_dir`, `run_dir`, `data_dir`,
+`experiment_id`, `run_id`, `benchmark_executable`, and `vcpkg_root` (an empty
+`VCPKG_ROOT` is an error rather than a silently broken toolchain path). Wrap a
+literal brace as `{{` or `}}` so a command may carry a JSON or Python payload.
+
+`mode: script` skips configure/build, records the interpreter and its version
+instead of a binary hash, and is what `benchmarks/json_baseline` uses.
+
+## ingest
+
+`--strict` makes an import fail when benchmark rows cannot be mapped to exactly
+one variant. Mapped-out rows stay stored as UNMAPPED or AMBIGUOUS either way;
+this flag decides whether that is acceptable for a formal record.
+
+## report and export
+
+~~~powershell
+ze-research report --experiment scanner-width-comparison `
+  --pair scanner8-library:scanner64-library
+ze-research export --experiment scanner-width-comparison
+~~~
+
+`report` aggregates `run_type == iteration` rows into medians, refuses to
+compare rows with different units or a missing pair side, and lists unmapped
+rows. It records the comparison in `analysis_runs` and `derived_results` with
+the run IDs, manifest digests, definition fingerprint, dataset digest, and
+correctness gates behind it. A non-zero exit means the numbers exist but are
+not yet defensible.
+
+`export` writes the same analysis as JSON for `scripts/analyze_result/main.py`,
+so notebook figures are derived from ingested runs instead of loose
+`out/results/` files.

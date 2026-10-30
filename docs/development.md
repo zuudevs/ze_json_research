@@ -28,16 +28,42 @@ Implemented:
 - Manifest verification and run listing.
 
 Not yet implemented:
-- Moving existing ze_json research harnesses into this repository.
 - A profiler-specific parser or coverage importer.
-- Statistical analysis reports and visualization.
+- Statistical analysis reports beyond median/pair comparison and visualization.
 - Remote ingest/API/server.
 - Digital signature of manifests.
 - Full binary/build reproducibility or a sandbox for arbitrary declared commands.
 
+Partially integrated so far: the ze_json scanner benchmark and the Google Test
+suite are recorded through this repository. The parser, session, span_iso, and
+JSON.parse baseline harnesses do not have experiment definitions yet; their
+integration follows the same pattern (see `docs/registry.md`, "Execution steps",
+and `docs/cli.md`).
+
 ## Test expectations
 
 Tests should cover valid and invalid registry definitions, duplicate IDs, unknown basis references, external path rejection, migration repeatability, manifest tampering, import idempotency, mapping status, and failed command handling.
+
+Coverage for the benchmark/test integration additionally includes: dataset
+drift and missing-dataset refusal, declared step order and output attribution,
+script-mode interpreter version, gate acceptance and rejection (no gate run,
+wrong commit, unverified run), report pair comparison including unit mismatch
+refusal and unmapped visibility, export provenance, and idempotent analysis
+recording.
+
+A fast way to exercise the whole pipeline without a C++ toolchain:
+
+~~~powershell
+ze-research init
+New-Item -ItemType Directory -Force $env:TEMP\smoke-registry | Out-Null
+python scripts/research/make_smoke_experiment.py $env:TEMP\smoke-registry\smoke.yaml
+ze-research validate --registry-dir $env:TEMP\smoke-registry --for-run
+$run = ze-research run --experiment smoke-script-benchmark --registry-dir $env:TEMP\smoke-registry
+$runId = ($run | ConvertFrom-Json).run_id
+ze-research verify --run-id $runId
+ze-research ingest --run-id $runId --strict
+ze-research report --experiment smoke-script-benchmark --pair fake-baseline:fake-candidate
+~~~
 
 Formal-run approval is a metadata gate, not a security sandbox. Only run command arrays reviewed by a trusted researcher. The runner does not invoke a shell, but a declared executable can still access the host filesystem.
 

@@ -14,6 +14,30 @@ Each run directory contains manifest.json, written atomically after the configur
 
 The manifest does not hash itself because that would be self-referential. The database stores a SHA-256 digest of the finalized manifest.
 
+## Inputs are hashed at run time, not at import time
+
+Declared workload datasets are hashed before any command runs. The digests are
+written to `metadata/inputs.json` (hashed as a run artifact) and copied into
+`manifest.inputs`. If a definition pins `dataset_sha256` and the checkout no
+longer matches it, the run is refused.
+
+Ingestion reads those recorded digests rather than recomputing them from the
+live working tree. Recomputing would let the tree change between measurement
+and import without any check noticing. A directory path (a corpus workload) is
+digested as a unit over its file list, skipping symlinks.
+
+## Correctness gates
+
+A performance run may declare `correctness_gate` against a correctness
+experiment. Before anything executes, the runner looks for a COMPLETED,
+VERIFIED run of that experiment on the same git commit and refuses when none
+exists. The gate run is recorded in `manifest.gates` and in
+`research_runs.gates_json`.
+
+This links the two kinds of evidence by commit instead of by memory. It does
+not prove the algorithm is faster, and it does not make an unreviewed
+definition runnable.
+
 ## Status meanings
 
 - VERIFIED: the mechanical checks implemented by the verifier passed.

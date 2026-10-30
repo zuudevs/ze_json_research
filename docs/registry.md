@@ -48,6 +48,71 @@ The run stores the complete definition snapshot, not just the current YAML path.
 
 ## Command arrays
 
-The runner launches commands without a shell. Do not rely on shell operators such as pipes, redirects, or &&. Use separate commands and declared output paths. Supported placeholders are source_dir, build_dir, run_dir, data_dir, experiment_id, run_id, and benchmark_executable.
+The runner launches commands without a shell. Do not rely on shell operators such as pipes, redirects, or &&. Use separate commands and declared output paths. Supported placeholders are source_dir, build_dir, run_dir, data_dir, experiment_id, run_id, benchmark_executable, and vcpkg_root.
 
 Review executable paths and commands before approval. A registry is executable configuration, not inert documentation.
+
+## Execution steps
+
+`execution.steps` is the explicit command list and supersedes the legacy
+`configure_command`/`build_command`/`run_command` trio. Use it whenever a run
+needs more than three commands, such as one step per test executable.
+
+Each step declares an `id` (unique), a `command` argument array, optionally
+`cwd: source_dir|run_dir` and `required: false`. The runner records which step
+produced which expected output, so imported results are attributed to the
+execution that really created them.
+
+`execution.mode` selects `native` (configure/build, binary hashes) or `script`
+(no build, interpreter identity and version recorded). `mode: script` is what
+`benchmarks/json_baseline` declares; its wrapper writes its own artifacts into
+the external run directory.
+
+`execution.env_passthrough` names environment variables that can change a
+measurement. The runner records their names and values at run time so the
+measurement contract is complete.
+
+Literal braces are written `{{` and `}}` because `{name}` is reserved for
+placeholders. An unknown `{name}` is rejected instead of passed through.
+
+## Workload tokens and mapping honesty
+
+A variant's `benchmark_name_pattern` may contain `{dataset}`. Every workload
+must then declare `benchmark_token` (for example `GithubEvents`), which the
+registry substitutes into the stored pattern so the result is an exact
+benchmark name. This is deliberate:
+
+- a wildcard pattern matches `BM_Scanner8_Synth` as well as
+  `BM_Scanner8_GithubEvents`, which labels a synthetic payload as a real
+  dataset workload;
+- with more than one workload the same wildcard matches several specs and the
+  row becomes AMBIGUOUS.
+
+A literal pattern (no `{dataset}`) is only valid for a single-workload
+experiment. Rows that map to nothing stay UNMAPPED; the system never guesses.
+
+A workload with `dataset_path: null` may still declare a token, which is how
+an in-process generated payload is recorded without pretending a file exists.
+
+## Correctness gates
+
+`correctness_gate` declares the evidence a performance run must already have:
+
+~~~yaml
+correctness_gate:
+  id: gate-correctness-suite
+  experiment_id: correctness-gtest-suite
+  require_verification_status: VERIFIED   # default
+  require_same_commit: true               # default
+~~~
+
+The runner refuses to start when no matching run exists, and records the gate
+run it used in the manifest. The gate is fail-closed on purpose: missing
+evidence is not permission.
+
+## Dataset digests
+
+`dataset_sha256` values come from the ze_json-side generator
+(`scripts/research/dataset-digests.py`), not from memory. The runner re-hashes
+each declared dataset before executing and aborts when the bytes no longer
+match the reviewed definition.

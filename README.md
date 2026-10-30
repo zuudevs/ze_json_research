@@ -22,7 +22,26 @@ No server or HTTP API is required for local execution.
 - Import of Google Benchmark JSON and basic Google Test JSON.
 - Idempotent re-import of an identical manifest, with rejection when an existing run ID has a different manifest digest.
 
-Profiler-specific and coverage-specific importers, statistical reports, remote ingest, and signed manifests are future integrations, not current MVP capabilities.
+Profiler-specific and coverage-specific importers, remote ingest, and signed manifests are future integrations, not current MVP capabilities.
+
+## Benchmark and test integration
+
+Two experiments currently record real ze_json evidence:
+
+| ID | Run of | Notes |
+|---|---|---|
+| `scanner-width-comparison` | `benchmarks/scanner_benchmark` | scanner8/scanner64 plus three frozen replicas; five real datasets plus synthetic payloads |
+| `correctness-gtest-suite` | the eight `tests/` executables | per-case JSON results; the gate source for the scanner experiment |
+
+Each declared workload dataset is hashed when the run starts and refused if the
+bytes no longer match the reviewed definition; the digests are stored with the
+run, not recomputed later. A performance run additionally requires a VERIFIED
+correctness run on the same commit, so a speed claim can always name the test
+run that supports it.
+
+Parser, session, span_iso, and the JavaScript `JSON.parse` baseline do not have
+experiment definitions yet; `execution.mode: script` and `execution.steps`
+exist for that next round of work (see `docs/cli.md`).
 
 ## Quick start (PowerShell)
 

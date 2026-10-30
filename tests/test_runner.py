@@ -78,6 +78,40 @@ def test_runner_builds_and_writes_all_output_outside_repositories(tmp_path):
     assert (manifest_path.parent / "metadata" / "inputs.json").is_file()
 
 
+def test_directory_workload_digest_matches_the_generator_convention(tmp_path):
+    """A corpus digest must be comparable with dataset-digests.json.
+
+    The generator names files relative to the repository root. Hashing the same
+    tree with folder-relative names produces a different digest, which would
+    make a reviewed definition un-runnable for no real reason.
+    """
+    source = _prepare_source(tmp_path, dataset=b"{}\n")
+    corpus = source / "samples" / "corpus"
+    corpus.mkdir()
+    (corpus / "b.json").write_text("[]\n", encoding="utf-8")
+    (corpus / "a.json").write_text("{}\n", encoding="utf-8")
+
+    from ze_research.runner import _hash_tree
+
+    tree = _hash_tree(corpus, source)
+    assert tree["file_count"] == 2
+    assert tree["kind"] == "directory"
+
+    import hashlib as _hashlib
+
+    a_payload, b_payload = b"payload-a\n", b"payload-b\n"
+    (corpus / "a.json").write_bytes(a_payload)
+    (corpus / "b.json").write_bytes(b_payload)
+
+    tree = _hash_tree(corpus, source)
+    assert tree["size_bytes"] == len(a_payload) + len(b_payload)
+    formula = (
+        "samples/corpus/a.json\t" + _hashlib.sha256(a_payload).hexdigest() + "\t%d\n" % len(a_payload)
+        + "samples/corpus/b.json\t" + _hashlib.sha256(b_payload).hexdigest() + "\t%d" % len(b_payload)
+    )
+    assert tree["sha256"] == _hashlib.sha256(formula.encode("utf-8")).hexdigest()
+
+
 def _prepare_source(tmp_path: Path, *, dataset: bytes) -> Path:
     source = tmp_path / "ze_json"
     source.mkdir()

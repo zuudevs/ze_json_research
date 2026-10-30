@@ -138,18 +138,24 @@ def _normalize_steps(
     return steps
 
 
-def _hash_tree(root: Path) -> dict[str, Any]:
+def _hash_tree(root: Path, source_dir: Path) -> dict[str, Any]:
     """Digest a directory as a unit so corpus workloads can be pinned.
+
+    Names are recorded relative to the source root, which is the same
+    convention as scripts/research/dataset-digests.py, so a directory digest
+    computed here can be compared directly against the generated manifest.
 
     Symlinks are skipped: a linked file can point outside the checkout and
     would make the recorded digest meaningless.
     """
+    checkout = source_dir.resolve()
     entries: list[tuple[str, str, int]] = []
     for path in sorted(root.rglob("*")):
         if not path.is_file() or path.is_symlink():
             continue
         entries.append(
-            (path.relative_to(root).as_posix(), sha256_file(path), path.stat().st_size)
+            (path.resolve().relative_to(checkout).as_posix(),
+             sha256_file(path), path.stat().st_size)
         )
     formula = "\n".join(f"{name}\t{digest}\t{size}" for name, digest, size in entries)
     return {
@@ -192,7 +198,7 @@ def _collect_input_snapshots(
             )
         declared = workload.get("dataset_sha256")
         if resolved.is_dir():
-            tree = _hash_tree(resolved)
+            tree = _hash_tree(resolved, source_dir)
             actual: str | None = tree["sha256"]
             size: int | None = int(tree["size_bytes"])
             extra = {"file_count": tree["file_count"], "kind": "directory"}

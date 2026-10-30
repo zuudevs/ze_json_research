@@ -2,21 +2,26 @@ schema_version: 1
 
 experiment:
   id: scanner-width-comparison
-  title: Scanner8 versus Scanner64
+  title: Scanner8 versus Scanner64, plus frozen replicas, in one process
   status: draft
   categories:
     - performance
     - json-scanning
 
   purpose: >
-    Mengukur latency dan throughput dua varian scanner JSON pada workload
-    dan kontrak pengukuran yang telah ditentukan.
+    Mengukur latency dan throughput varian scanner JSON pada workload dan
+    kontrak pengukuran yang telah ditentukan, termasuk pembandingan terhadap
+    replika algoritma yang dibekukan di dalam executable yang sama.
+
   motivation: >
     Perubahan implementasi scanner perlu dievaluasi melalui pengukuran
     terkontrol, bukan disimpulkan dari nama algoritma atau satu angka saja.
+
   research_question: >
     Bagaimana perbedaan latency dan throughput Scanner8 dan Scanner64
-    pada workload yang sama dengan kontrak pengukuran yang sama?
+    pada workload yang sama dengan kontrak pengukuran yang sama, dan
+    seberapa besar biaya atau manfaat ketika varian tersimpan di library
+    dibandingkan replika algoritma lawas dalam proses yang sama?
 
   hypotheses:
     - id: H1
@@ -26,35 +31,77 @@ experiment:
         dari data yang dikumpulkan, bukan diasumsikan benar.
       metric: real_time
       expected_direction: lower
+    - id: H2
+      statement: >
+        Pemisahan implementasi varian di library (Tahap 4) dapat mengembalikan
+        throughput yang sebelumnya hilang pada replika terintegrasi. Klaim ini
+        hanya sah jika kedua sisi diukur di proses dan dataset yang sama.
+      metric: real_time
+      expected_direction: lower
 
   assumptions:
     - Dataset yang dibandingkan harus identik secara byte.
     - Environment dan konfigurasi build dicatat pada manifest.
+    - Build mereplikasi preset native-release proyek (clang, C++23, vcpkg).
+
   limitations:
     - Hasil berlaku pada workload, compiler, konfigurasi, dan environment yang tercatat.
     - Perbedaan antarproses tidak otomatis menjadi bukti kausal.
+    - Pasangan dalam satu proses tidak berarti interleaved per iterasi.
 
   research_basis:
     - id: BASIS-IMPL-001
       basis_type: internal_implementation
       statement: >
-        Kode benchmark proyek mendefinisikan keluarga benchmark Scanner8
-        dan Scanner64. Detail implementasi dan kesetaraan kontrak harus
-        diperiksa pada revision yang benar-benar diuji.
+        Kode benchmark proyek mendefinisikan keluarga benchmark Scanner8 dan
+        Scanner64, beberapa benchmark replika terintegrasi, dan payload
+        sintetis. Detail implementasi dan kesetaraan kontrak harus diperiksa
+        pada revision yang benar-benar diuji.
       reference_ids:
         - REF-SCANNER-BENCHMARK-SOURCE
+        - REF-DATASET-DIGESTS
+    - id: BASIS-CORRECTNESS-001
+      basis_type: internal_implementation
+      statement: >
+        Bukti performa hanya dapat dipertanggungjawabkan bila suite test
+        proyek lulus pada commit yang sama. Eksperimen ini memakai gate
+        lintas-run terhadap eksperimen korektness.
+      reference_ids:
+        - REF-CORRECTNESS-SUITE
 
   references:
     - id: REF-SCANNER-BENCHMARK-SOURCE
       source_type: source_code
       title: ze_json scanner benchmark implementation
       url: https://github.com/zuudevs/ze_json/blob/main/benchmarks/scanner_benchmark/main.cpp
-      locator: MAKE_SCANNER_BENCHMARK and scanner benchmark registrations
+      locator: MAKE_SCANNER_BENCHMARK, MAKE_REPLICA_BENCHMARK, and BM_Scanner*_Synth registrations
       accessed_at: null
       evidence_note: >
-        Tinjau file pada commit source yang akan diuji. Referensi ini
-        menunjuk implementasi benchmark; referensi ini sendiri tidak
-        membuktikan bahwa satu varian lebih cepat.
+        Tinjau file pada commit source yang akan diuji. Referensi ini menunjuk
+        implementasi benchmark; referensi ini sendiri tidak membuktikan bahwa
+        satu varian lebih cepat.
+      review_status: unreviewed
+    - id: REF-DATASET-DIGESTS
+      source_type: local_file
+      title: Dataset SHA-256 digests for samples/commons
+      url: null
+      locator: scripts/research/dataset-digests.json
+      accessed_at: null
+      evidence_note: >
+        Nilai dataset_sha256 pada definisi ini diambil dari berkas tersebut,
+        yang dihasilkan oleh scripts/research/dataset-digests.py dari checkout
+        yang diuji. Runner menolak run bila digest file berbeda dari yang
+        tercatat di sini.
+      review_status: unreviewed
+    - id: REF-CORRECTNESS-SUITE
+      source_type: source_code
+      title: ze_json Google Test suite
+      url: https://github.com/zuudevs/ze_json/blob/main/tests
+      locator: scanner_test, document_test, object_test, number_test, session_test, array_test, path_test, json_checker_test
+      accessed_at: null
+      evidence_note: >
+        Menunjuk suite test produk. Gate pada definisi ini hanya menerima run
+        korektness berstatus VERIFIED pada commit source yang identik.
       review_status: unreviewed
 
   metrics:
@@ -71,53 +118,147 @@ experiment:
     require_same_workload: true
     require_same_measurement_contract: true
     notes: >
-      Template ini menjalankan satu executable sekali, tetapi runner tidak
-      menginterleave setiap iterasi antarvarian. Sebelum mengklaim perbandingan
-      interleaved, audit urutan registrasi benchmark dan gunakan harness yang
-      benar-benar menjalankan pasangan dengan desain tersebut.
+      Semua varian terdaftar pada satu executable dan dijalankan satu proses.
+      Google Benchmark menjalankan registrasi secara berurutan dalam proses
+      tersebut; ia TIDAK menginterleave iterasi antarvarian. Klaim yang
+      mensyaratkan interleaving per iterasi tidak dapat dukung oleh definisi
+      ini. Pengurutan registrasi dicatat pada artefak keluaran benchmark.
 
   comparison:
     group: scanner-width
-    baseline: scanner8
-    candidate: scanner64
+    baseline: scanner8-library
+    candidate: scanner64-library
+
+  correctness_gate:
+    id: gate-correctness-suite
+    experiment_id: correctness-gtest-suite
+    require_verification_status: VERIFIED
+    require_same_commit: true
 
   variants:
-    - id: scanner8
-      name: Scanner8
-      description: Scanner 8-byte variant; verify implementation at the tested revision.
+    - id: scanner8-library
+      name: Scanner8 (library)
+      description: Varian 8-byte pada library zuu::scanner::scanner8.
       comparison_role: baseline
-      lifecycle_status: experimental
+      lifecycle_status: approved
       measurement_contract_id: structural-scan-v1
       benchmark_name_pattern: "BM_Scanner8_{dataset}"
-    - id: scanner64
-      name: Scanner64
-      description: Scanner 64-bit variant; verify implementation at the tested revision.
+
+    - id: scanner64-library
+      name: Scanner64 (library)
+      description: Varian 64-bit pada library zuu::scanner::scanner64.
       comparison_role: candidate
-      lifecycle_status: experimental
+      lifecycle_status: approved
       measurement_contract_id: structural-scan-v1
       benchmark_name_pattern: "BM_Scanner64_{dataset}"
 
+    - id: scanner8-integrated-replica
+      name: Scanner8 integrated replica
+      description: >
+        Replika algoritma scanner8 versi terintegrasi (pasca Tahap 4),
+        disimpan di direktori benchmark sebagai pembanding dalam proses.
+      comparison_role: replica
+      lifecycle_status: frozen
+      measurement_contract_id: structural-scan-v1
+      benchmark_name_pattern: "BM_Scanner8_IntegratedReplica_{dataset}"
+
+    - id: scanner64-untyped-replica
+      name: Scanner64 untyped-depth replica
+      description: >
+        Replika scanner64 pra-v0.1.5 dengan kedalaman tidak bertipe; mengisolasi
+        biaya pencatatan kedalaman bertipe.
+      comparison_role: replica
+      lifecycle_status: frozen
+      measurement_contract_id: structural-scan-v1
+      benchmark_name_pattern: "BM_Scanner64_UntypedReplica_{dataset}"
+
+    - id: scanner64-span-baseline-replica
+      name: Scanner64 pre-hybrid span replica
+      description: >
+        Replika span byte-per-byte pra-hybrid (v0.1.6 beku) sebagai baseline
+        terhadap library scanner64 yang kini probe-hybrid.
+      comparison_role: replica
+      lifecycle_status: frozen
+      measurement_contract_id: structural-scan-v1
+      benchmark_name_pattern: "BM_Scanner64_SpanBaselineReplica_{dataset}"
+
   workloads:
+    - id: tiny
+      name: Tiny JSON document
+      benchmark_token: Tiny
+      dataset_path: samples/commons/tiny.json
+      dataset_sha256: 5efdba33955601fd7b79d7b004d84413b6d0cef5c6c63b2be074ad58b1cc35dd
+      parameters: {}
+
+    - id: literal
+      name: Literal-heavy JSON document
+      benchmark_token: Literal
+      dataset_path: samples/commons/literal.json
+      dataset_sha256: 59ab0369bc27c37e6497b6d2a40325486df119288a59ac470d711efcacae148e
+      parameters: {}
+
     - id: github-events
       name: GitHub Events JSON dataset
-      dataset_path: samples/github_events.json
-      dataset_sha256: null
+      benchmark_token: GithubEvents
+      dataset_path: samples/commons/github_events.json
+      dataset_sha256: cfdc77cb9208ad72b049ed5a87fdc2f4bba49d70cebefeb2fc61522c3afaec95
       parameters: {}
+
+    - id: update-center
+      name: Update center JSON dataset
+      benchmark_token: UpdateCenter
+      dataset_path: samples/commons/update-center.json
+      dataset_sha256: 72d59197d175ec613206a723082d7fde98540677814d0d2f2600265dd7848a3f
+      parameters: {}
+
+    - id: jeopardy
+      name: Jeopardy JSON dataset
+      benchmark_token: Jeopardy
+      dataset_path: samples/commons/jeopardy.json
+      dataset_sha256: e93247fed3511e025b9f4c7d3a6ab3334c77546401fb1d64f4d558af09506308
+      parameters: {}
+
+    - id: synthetic-256k
+      name: Synthetic in-process payload (256 KiB)
+      benchmark_token: Synth
+      dataset_path: null
+      dataset_sha256: null
+      parameters:
+        generator: make_synth_json
+        target_bytes: 262144
+      notes: >
+        Payload dibangkitkan di dalam proses oleh make_synth_json(256 * 1024).
+        Tidak ada berkas dataset yang dihash; identitas payload diperkuat oleh
+        commit source dan hash executable.
+
+    - id: replica-jeopardy-via-synth-slot
+      name: Jeopardy payload under the replica Synth name slot
+      benchmark_token: Synth
+      dataset_path: samples/commons/jeopardy.json
+      dataset_sha256: e93247fed3511e025b9f4c7d3a6ab3334c77546401fb1d64f4d558af09506308
+      parameters: {}
+      notes: >
+        Registrasi replika memakai label Synth tetapi membaca jeopardy.json.
+        Workload terpisah ini mencegah payload sintetis salah diklaim sebagai
+        jeopardy dan sebaliknya.
 
   measurement_contracts:
     - id: structural-scan-v1
       name: Structural scanner benchmark
-      operation: Scan the supplied JSON payload with the selected scanner benchmark.
+      operation: Scan the supplied JSON payload with the selected scanner implementation.
       includes:
         - work performed inside the registered scanner benchmark loop
       excludes:
+        - dataset loading and the initial validation scan performed before the timed loop
         - conclusions about full parser performance unless separately measured
       notes: >
         Audit main.cpp at the tested revision to verify exactly what setup,
         validation, and buffer management are included in the timed region.
+        Reservasi tape dihitung di luar loop untuk setiap registrasi.
 
   execution:
     preset: native-release
+    mode: native
     require_clean_worktree: true
     executable_path: "{build_dir}/benchmarks/scanner_benchmark"
     configure_command:
@@ -129,6 +270,14 @@ experiment:
       - -G
       - Ninja
       - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_C_COMPILER=clang
+      - -DCMAKE_CXX_COMPILER=clang++
+      - -DCMAKE_CXX_STANDARD=23
+      - -DCMAKE_CXX_STANDARD_REQUIRED=ON
+      - -DCMAKE_CXX_EXTENSIONS=OFF
+      - -DCMAKE_CXX_FLAGS=-Wno-c2y-extensions
+      - -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - -DCMAKE_TOOLCHAIN_FILE={vcpkg_root}/scripts/buildsystems/vcpkg.cmake
     build_command:
       - cmake
       - --build
@@ -139,5 +288,8 @@ experiment:
       - "{benchmark_executable}"
       - "--benchmark_out={run_dir}/raw/scanner_benchmark.json"
       - --benchmark_out_format=json
+      - --benchmark_repetitions=1
+    env_passthrough:
+      - VCPKG_ROOT
     expected_outputs:
       - raw/scanner_benchmark.json

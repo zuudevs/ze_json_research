@@ -1,0 +1,222 @@
+schema_version: 1
+
+experiment:
+  id: correctness-gtest-suite
+  title: Product correctness suite for ze_json
+  status: draft
+  categories:
+    - correctness
+    - json-scanning
+
+  purpose: >
+    Menjalankan seluruh suite Google Test produk pada satu commit source dan
+    merekam hasil per kasus sebagai bukti korektness yang dapat diverifikasi.
+
+  motivation: >
+    Angka performa hanya dapat dipertanggungjawabkan bila library memang
+    benar pada commit yang sama. Suite ini menyediakan bukti tersebut dan
+    menjadi gate bagi eksperimen performa.
+
+  research_question: >
+    Apakah seluruh suite Google Test produk lulus pada commit, compiler, dan
+    konfigurasi build yang tercatat?
+
+  hypotheses:
+    - id: H1
+      statement: >
+        Seluruh kasus uji lulus pada konfigurasi build ini. Kegagalan mana pun
+        harus membuat run berstatus FAILED, bukan diam-diam dilaporkan lulus.
+      metric: test_status
+      expected_direction: all_passed
+
+  assumptions:
+    - Suite dijalankan pada build Release yang sama dengan eksperimen performa.
+    - Korpus json.org yang dipakai json_checker_test berasal dari submodule samples.
+
+  limitations:
+    - Lulusnya suite test tidak membuktikan sifat performa apa pun.
+    - Cakupan suite dibatasi oleh kasus yang benar-benar didaftarkan.
+
+  research_basis:
+    - id: BASIS-TESTS-001
+      basis_type: internal_implementation
+      statement: >
+        Enam executable Google Test ditentukan di tests/CMakeLists.txt dan satu
+        executable korpus ditentukan di tests/JSON_checker_test/CMakeLists.txt.
+      reference_ids:
+        - REF-GTEST-SUITE
+    - id: BASIS-CORPUS-001
+      basis_type: internal_implementation
+      statement: >
+        json_checker_test membaca korpus dari direktori samples/JSON_checker.
+        Identitas korpus dicatat sebagai digest direktori.
+      reference_ids:
+        - REF-CORPUS-DIGESTS
+
+  references:
+    - id: REF-GTEST-SUITE
+      source_type: source_code
+      title: ze_json Google Test suite
+      url: https://github.com/zuudevs/ze_json/blob/main/tests/CMakeLists.txt
+      locator: add_test_target registrations and gtest_discover_tests
+      accessed_at: null
+      evidence_note: >
+        Tinjau commit yang akan diuji untuk memastikan target yang benar-benar
+        dibangun dan dijalankan sesuai daftar pada execution.steps.
+      review_status: unreviewed
+    - id: REF-CORPUS-DIGESTS
+      source_type: local_file
+      title: SHA-256 digests for the json.org checker corpus
+      url: null
+      locator: scripts/research/dataset-digests.py --output <temp> samples/JSON_checker
+      accessed_at: null
+      evidence_note: >
+        Digest direktori dihitung dari 37 berkas pada samples/JSON_checker pada
+        commit yang diuji. Runner menolak run bila digest direktori berubah.
+      review_status: unreviewed
+
+  metrics:
+    primary:
+      name: test_status
+      unit: pass/fail
+      direction: all_passed
+
+  protocol:
+    design: single_process_per_executable
+    require_same_workload: true
+    require_same_measurement_contract: true
+    notes: >
+      Setiap executable test dijalankan sebagai proses terpisah dengan
+      --gtest_output=json sehingga setiap kasus direkam satu per satu. Suite
+      tidak saling bergantung; kegagalan satu suite tidak menyembunyikan
+      kegagalan suite lain.
+
+  comparison:
+    group: correctness-suite
+    baseline: ze-json-core
+    candidate: ze-json-core
+
+  variants:
+    - id: ze-json-core
+      name: ze_json_core library under test
+      description: >
+        Bawaan library yang dibangun dari commit source yang tercatat pada
+        manifest. Dipakai sebagai identitas bukti korektness, bukan sebagai
+        pembanding performa.
+      comparison_role: control
+      lifecycle_status: approved
+      measurement_contract_id: correctness-contract-v1
+      benchmark_name_pattern: "Correctness"
+
+  workloads:
+    - id: json-checker-corpus
+      name: json.org JSON_checker corpus
+      benchmark_token: Corpus
+      dataset_path: samples/JSON_checker
+      dataset_sha256: 6ad31dcc343530e57814c8cc3c3f11939f6c51955791718be77305cf98924b46
+      parameters:
+        file_count: 37
+        composition: pass1..pass3 accepted; fail1..fail33 rejected except the lazily deferred and depth cases
+
+  measurement_contracts:
+    - id: correctness-contract-v1
+      name: Google Test suite execution
+      operation: Build the declared test targets and run each executable with JSON output.
+      includes:
+        - every test case reported by the eight declared executables
+      excludes:
+        - assertions about performance
+        - cases disabled at compile time or by command line
+      notes: >
+        benchmark_name_pattern tidak dipakai untuk pemetaan hasil; importer test
+        menyimpan setiap kasus berdasarkan suite dan nama kasus.
+
+  execution:
+    preset: native-release
+    mode: native
+    require_clean_worktree: true
+    executable_paths:
+      - "{build_dir}/tests/scanner_test"
+      - "{build_dir}/tests/document_test"
+      - "{build_dir}/tests/object_test"
+      - "{build_dir}/tests/number_test"
+      - "{build_dir}/tests/session_test"
+      - "{build_dir}/tests/array_test"
+      - "{build_dir}/tests/path_test"
+      - "{build_dir}/tests/JSON_checker_test/json_checker_test"
+    steps:
+      - id: configure
+        command:
+          - cmake
+          - -S
+          - "{source_dir}"
+          - -B
+          - "{build_dir}"
+          - -G
+          - Ninja
+          - -DCMAKE_BUILD_TYPE=Release
+          - -DCMAKE_C_COMPILER=clang
+          - -DCMAKE_CXX_COMPILER=clang++
+          - -DCMAKE_CXX_STANDARD=23
+          - -DCMAKE_CXX_STANDARD_REQUIRED=ON
+          - -DCMAKE_CXX_EXTENSIONS=OFF
+          - -DCMAKE_CXX_FLAGS=-Wno-c2y-extensions
+          - -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          - -DCMAKE_TOOLCHAIN_FILE={vcpkg_root}/scripts/buildsystems/vcpkg.cmake
+      - id: build-tests
+        command:
+          - cmake
+          - --build
+          - "{build_dir}"
+          - --target
+          - scanner_test
+          - document_test
+          - object_test
+          - number_test
+          - session_test
+          - array_test
+          - path_test
+          - json_checker_test
+      - id: test-scanner
+        command:
+          - "{build_dir}/tests/scanner_test"
+          - "--gtest_output=json:{run_dir}/raw/tests/scanner_test.json"
+      - id: test-document
+        command:
+          - "{build_dir}/tests/document_test"
+          - "--gtest_output=json:{run_dir}/raw/tests/document_test.json"
+      - id: test-object
+        command:
+          - "{build_dir}/tests/object_test"
+          - "--gtest_output=json:{run_dir}/raw/tests/object_test.json"
+      - id: test-number
+        command:
+          - "{build_dir}/tests/number_test"
+          - "--gtest_output=json:{run_dir}/raw/tests/number_test.json"
+      - id: test-session
+        command:
+          - "{build_dir}/tests/session_test"
+          - "--gtest_output=json:{run_dir}/raw/tests/session_test.json"
+      - id: test-array
+        command:
+          - "{build_dir}/tests/array_test"
+          - "--gtest_output=json:{run_dir}/raw/tests/array_test.json"
+      - id: test-path
+        command:
+          - "{build_dir}/tests/path_test"
+          - "--gtest_output=json:{run_dir}/raw/tests/path_test.json"
+      - id: test-json-checker
+        command:
+          - "{build_dir}/tests/JSON_checker_test/json_checker_test"
+          - "--gtest_output=json:{run_dir}/raw/tests/json_checker_test.json"
+    env_passthrough:
+      - VCPKG_ROOT
+    expected_outputs:
+      - raw/tests/scanner_test.json
+      - raw/tests/document_test.json
+      - raw/tests/object_test.json
+      - raw/tests/number_test.json
+      - raw/tests/session_test.json
+      - raw/tests/array_test.json
+      - raw/tests/path_test.json
+      - raw/tests/json_checker_test.json

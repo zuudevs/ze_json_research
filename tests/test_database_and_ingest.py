@@ -1,7 +1,12 @@
 import json
 from pathlib import Path
 
-from ze_research.database import connect, database_status, migrate
+from ze_research.database import (
+    MIGRATIONS_DIR,
+    connect,
+    database_status,
+    migrate,
+)
 from ze_research.ingest import ingest_manifest
 from ze_research.manifest import collect_artifacts, sha256_file, verify_manifest, write_json_atomic
 from ze_research.registry import definition_sha256, load_yaml
@@ -11,14 +16,23 @@ ROOT = Path(__file__).resolve().parents[1]
 EXPERIMENT_PATH = ROOT / "research" / "experiments" / "scanner-width.yaml"
 
 
+def _expected_migrations() -> list[int]:
+    return sorted(
+        int(path.name.split("_", 1)[0])
+        for path in MIGRATIONS_DIR.glob("[0-9][0-9][0-9]_*.sql")
+    )
+
+
 def test_migration_is_idempotent_and_database_is_healthy(tmp_path):
     database = tmp_path / "database" / "research.sqlite"
-    assert migrate(database) == [1]
+    expected = _expected_migrations()
+    assert expected, "setidaknya satu migrasi harus tersedia"
+    assert migrate(database) == expected
     assert migrate(database) == []
     status = database_status(database)
     assert status["integrity_check"] == "ok"
     assert status["foreign_key_violations"] == []
-    assert len(status["migrations"]) == 1
+    assert [entry["version"] for entry in status["migrations"]] == expected
 
 
 def _create_manifest(tmp_path: Path) -> Path:

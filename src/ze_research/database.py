@@ -196,7 +196,18 @@ def persist_definition(connection: sqlite3.Connection, document: dict[str, Any])
 
     comparison_group = experiment.get("comparison", {}).get("group")
     for variant in experiment.get("variants", []):
-        for workload in experiment.get("workloads", []):
+        # A variant may restrict itself to the workloads it really implements;
+        # otherwise it is crossed with every declared workload.
+        selected = variant.get("workloads")
+        if selected is None:
+            workloads = experiment.get("workloads", [])
+        else:
+            allowed = set(selected)
+            workloads = [
+                workload for workload in experiment.get("workloads", [])
+                if workload.get("id") in allowed
+            ]
+        for workload in workloads:
             # Substitute the workload's benchmark token into the variant pattern
             # so that the stored pattern is an exact benchmark name. A wildcard
             # pattern would let one imported row match several specs, which is

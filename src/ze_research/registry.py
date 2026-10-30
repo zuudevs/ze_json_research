@@ -268,6 +268,26 @@ def validate_experiment(
     if not isinstance(protocol, dict) or not _nonempty(protocol.get("design")):
         errors.append("experiment.protocol.design wajib diisi.")
 
+    # A variant may declare which workloads it actually applies to. Without
+    # this, every variant is crossed with every workload and two workloads that
+    # share a benchmark token collide on the same name pattern.
+    for variant in variant_list:
+        if not isinstance(variant, dict):
+            continue
+        restricted = variant.get("workloads")
+        if restricted is None:
+            continue
+        if not isinstance(restricted, list) or not restricted:
+            errors.append(
+                f"Varian {variant.get('id')!r}: workloads harus berupa array ID nonkosong."
+            )
+            continue
+        for workload_id in restricted:
+            if workload_id not in workload_ids:
+                errors.append(
+                    f"Varian {variant.get('id')!r} merujuk workload yang tidak ada: {workload_id!r}."
+                )
+
     comparison = experiment.get("comparison", {})
     if comparison and not isinstance(comparison, dict):
         errors.append("experiment.comparison harus berupa object/map.")

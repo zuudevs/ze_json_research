@@ -6,6 +6,7 @@ from ze_research.database import (
     connect,
     database_status,
     migrate,
+    persist_definition,
 )
 from ze_research.ingest import ingest_manifest
 from ze_research.manifest import collect_artifacts, sha256_file, verify_manifest, write_json_atomic
@@ -140,3 +141,36 @@ def test_import_refuses_tampered_artifact(tmp_path):
         assert False, "Tampered artifact must be rejected."
     except RuntimeError as exc:
         assert "gagal verifikasi" in str(exc)
+
+
+def test_restricted_workloads_produce_one_pattern_per_variant_and_workload(tmp_path):
+    """Two workloads sharing a token must not collapse into one ambiguous spec.
+
+    The scanner benchmark really does use the Synth name slot for two different
+    payloads. Restricting each variant to the workloads it implements keeps
+    every stored pattern unambiguous.
+    """
+    database = tmp_path / "research.sqlite"
+    migrate(database)
+    document = load_yaml(EXPERIMENT_PATH)
+    experiment = document["experiment"]
+    experiment["variants"][0]["workloads"] = [
+        "synthetic-256k", "replica-jeopardy-via-synth-slot",
+    ]
+    experiment["variants"][1]["workloads"] = []
+
+    snapshot = {"schema_version": document.get("schema_version"), "experiment": experiment}
+    with connect(database) as connection:
+        version_id = persist_definition(connection, snapshot)
+
+    with connect(database) as connection:
+        rows = connection.execute(
+            "SELECT workload_id, name_pattern, algorithm_id FROM benchmark_specs "
+            "WHERE experiment_version_id=? AND algorithm_id='scanner8-library' "
+            "ORDER BY workload_id", (version_id,)
+        ).fetchall()
+    # Both specs exist, one per workload, so a row maps to exactly one target.
+    assert [(row["workload_id"], row["name_pattern"]) for row in rows] == [
+        ("replica-jeopardy-via-synth-slot", "BM_Scanner8_Synth"),
+        ("synthetic-256k", "BM_Scanner8_Synth"),
+    ]

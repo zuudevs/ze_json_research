@@ -64,6 +64,24 @@ def test_literal_pattern_is_rejected_for_multiple_workloads():
     assert any("ambigu" in error for error in errors)
 
 
+def test_variant_may_restrict_its_workloads():
+    """Two workloads must not collapse onto the same name pattern."""
+    document = load_yaml(REGISTRY / "scanner-width.yaml")
+    assert validate_experiment(document) == []
+
+    # Every library variant must stay single-workload for its Synth slot, and
+    # a replica variant must not claim the synthetic payload.
+    variants = {variant["id"]: variant for variant in document["experiment"]["variants"]}
+    assert "synthetic-256k" in variants["scanner8-library"]["workloads"]
+    assert "synthetic-256k" not in variants["scanner8-integrated-replica"]["workloads"]
+    assert "replica-jeopardy-via-synth-slot" in variants["scanner64-untyped-replica"]["workloads"]
+
+    unknown = json.loads(json.dumps(document))
+    unknown["experiment"]["variants"][0]["workloads"] = ["absent-workload"]
+    errors = validate_experiment(unknown)
+    assert any("workload yang tidak ada" in error for error in errors)
+
+
 def test_yaml_dates_do_not_break_the_definition_fingerprint():
     document = {
         "schema_version": 1,

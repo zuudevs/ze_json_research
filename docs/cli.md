@@ -80,6 +80,26 @@ ze-research list-runs
 
 db-status checks SQLite integrity, foreign keys, applied migrations, and record counts.
 
+## Operational notes for a formal run
+
+Three conditions stop a formal run before any command executes. Each one is a
+precondition the manifest depends on, not a warning:
+
+1. **A clean source worktree.** `git status --porcelain --untracked-files=all`
+   must print nothing. A nested repository inside the checkout (for example a
+   separate `thesis/` repository) shows up as untracked and blocks the run; add
+   it to `.gitignore` or move it outside the checkout.
+2. **Present workload datasets.** Each declared `dataset_path` must exist and
+   hash to the recorded `dataset_sha256`. A pinned submodule that was checked out
+   at a different commit counts as drift.
+3. **A satisfied correctness gate.** A performance experiment refuses to start
+   when no VERIFIED run of its declared correctness experiment exists on the
+   same commit, and the database has to exist for that lookup.
+
+The run also needs `VCPKG_ROOT` when a definition uses the `{vcpkg_root}`
+placeholder. Without it the run is refused instead of configuring a broken
+toolchain path.
+
 ## Exit codes
 
 - 0: command completed successfully.

@@ -148,6 +148,13 @@ experiment:
       lifecycle_status: approved
       measurement_contract_id: structural-scan-v1
       benchmark_name_pattern: "BM_Scanner8_{dataset}"
+      workloads:
+        - tiny
+        - literal
+        - github-events
+        - update-center
+        - jeopardy
+        - synthetic-256k
 
     - id: scanner64-library
       name: Scanner64 (library)
@@ -156,6 +163,13 @@ experiment:
       lifecycle_status: approved
       measurement_contract_id: structural-scan-v1
       benchmark_name_pattern: "BM_Scanner64_{dataset}"
+      workloads:
+        - tiny
+        - literal
+        - github-events
+        - update-center
+        - jeopardy
+        - synthetic-256k
 
     - id: scanner8-integrated-replica
       name: Scanner8 integrated replica
@@ -166,6 +180,10 @@ experiment:
       lifecycle_status: frozen
       measurement_contract_id: structural-scan-v1
       benchmark_name_pattern: "BM_Scanner8_IntegratedReplica_{dataset}"
+      workloads:
+        - github-events
+        - jeopardy
+        - replica-jeopardy-via-synth-slot
 
     - id: scanner64-untyped-replica
       name: Scanner64 untyped-depth replica
@@ -176,6 +194,10 @@ experiment:
       lifecycle_status: frozen
       measurement_contract_id: structural-scan-v1
       benchmark_name_pattern: "BM_Scanner64_UntypedReplica_{dataset}"
+      workloads:
+        - github-events
+        - jeopardy
+        - replica-jeopardy-via-synth-slot
 
     - id: scanner64-span-baseline-replica
       name: Scanner64 pre-hybrid span replica
@@ -186,6 +208,10 @@ experiment:
       lifecycle_status: frozen
       measurement_contract_id: structural-scan-v1
       benchmark_name_pattern: "BM_Scanner64_SpanBaselineReplica_{dataset}"
+      workloads:
+        - github-events
+        - update-center
+        - jeopardy
 
   workloads:
     - id: tiny

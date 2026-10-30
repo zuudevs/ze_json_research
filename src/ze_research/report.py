@@ -400,12 +400,19 @@ def export_payload(
             connection.close()
 
     sections = []
+    skipped: list[dict[str, str]] = []
     for current in experiments:
-        report = build_report(database_path=database_path, experiment_id=current)
-        sections.append(report)
+        try:
+            sections.append(build_report(database_path=database_path, experiment_id=current))
+        except ReportError as exc:
+            # An experiment with no benchmark rows (a correctness suite, for
+            # example) has nothing to export. Skipping is correct; crashing is
+            # not, because a plain "export everything" should still work.
+            skipped.append({"experiment_id": current, "reason": str(exc)})
     return {
         "export_version": REPORT_VERSION,
         "generated_at": _now(),
         "experiment_count": len(sections),
         "experiments": sections,
+        "skipped_experiments": skipped,
     }

@@ -1,4 +1,4 @@
-"""Reports must only claim what the stored evidence supports."""
+﻿"""Reports must only claim what the stored evidence supports."""
 
 import json
 import sqlite3
@@ -30,11 +30,13 @@ def _seed_run(
     benchmark_rows: list[dict],
     gate_run_id: str | None = None,
     experiment_id: str = "scanner-width-comparison",
+    run_id: str | None = None,
 ) -> Path:
     """Build a finished run directory that ingest will accept."""
     document = load_yaml(EXPERIMENT_PATH)
     experiment = document["experiment"]
     experiment["id"] = experiment_id
+    resolved_run_id = run_id or "seed-run-0001"
     if gate_run_id is None:
         experiment.pop("correctness_gate", None)
     else:
@@ -71,7 +73,7 @@ def _seed_run(
         },
     ]
 
-    run_dir = tmp_path / "runs" / "seed-run-0001"
+    run_dir = tmp_path / "runs" / resolved_run_id
     raw_dir = run_dir / "raw"
     raw_dir.mkdir(parents=True)
     (raw_dir / "scanner_benchmark.json").write_text(
@@ -84,7 +86,7 @@ def _seed_run(
     snapshot = _snapshot(document)
     manifest = {
         "manifest_schema_version": "1.0",
-        "run_id": "seed-run-0001",
+        "run_id": resolved_run_id,
         "experiment_id": experiment_id,
         "registry_path": str(EXPERIMENT_PATH),
         "registry_file_sha256": sha256_file(EXPERIMENT_PATH),
@@ -264,6 +266,36 @@ def test_record_analysis_is_idempotent(tmp_path):
     with connect(database) as connection:
         rows = connection.execute("SELECT COUNT(*) FROM analysis_inputs").fetchone()[0]
     assert rows == 1
+
+
+def test_export_skips_experiments_without_benchmark_rows(tmp_path):
+    """'export everything' must not crash on a correctness experiment."""
+    database = tmp_path / "research.sqlite"
+    ingest_manifest(
+        _seed_run(
+            tmp_path,
+            benchmark_rows=_rows("BM_Scanner8_GithubEvents", [20.0]),
+        ),
+        database,
+    )
+    # A correctness experiment legitimately has no benchmark rows at all.
+    ingest_manifest(
+        _seed_run(
+            tmp_path,
+            benchmark_rows=[],
+            experiment_id="correctness-gtest-suite",
+            run_id="seed-run-0002",
+        ),
+        database,
+    )
+
+    payload = export_payload(database_path=database)
+    exported = {section["experiment_id"] for section in payload["experiments"]}
+    assert "scanner-width-comparison" in exported
+    assert "correctness-gtest-suite" not in exported
+    skipped = {entry["experiment_id"] for entry in payload["skipped_experiments"]}
+    assert "correctness-gtest-suite" in skipped
+    assert payload["experiment_count"] == len(exported)
 
 
 def test_report_can_be_restricted_to_specific_runs(tmp_path):
